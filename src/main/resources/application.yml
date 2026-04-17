@@ -39,6 +39,10 @@ app:
 encryption:
   key: ${ENCRYPTION_KEY:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
 
+# Shopify Integration
+# Webhook auto-enhance uses: {app.base-url}/api/public/shopify/webhook/{userId}
+# Ensure app.base-url is set correctly in production.
+
 # Supabase Configuration (from config server)
 supabase:
   url: ${supabase.url:}

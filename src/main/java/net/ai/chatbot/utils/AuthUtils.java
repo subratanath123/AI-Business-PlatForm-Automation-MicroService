@@ -4,6 +4,9 @@ import net.ai.chatbot.dto.User;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class AuthUtils {
 
     /**
@@ -65,5 +68,78 @@ public class AuthUtils {
                 .build();
 
 
+    }
+
+    /**
+     * Clerk session claim {@code fva}: minutes since last first-factor verification,
+     * then minutes since last second-factor verification ({@code -1} if no second factor or never verified).
+     */
+    public static List<Integer> getFactorVerificationAgeMinutes() {
+        JwtAuthenticationToken authenticationToken = getJwtTokenOrNull();
+        if (authenticationToken == null) {
+            return List.of();
+        }
+        Object fva = authenticationToken.getTokenAttributes().get("fva");
+        return coerceIntList(fva);
+    }
+
+    /**
+     * Optional custom session claim (see {@link net.ai.chatbot.dto.MfaStatusResponse}).
+     */
+    public static Boolean getOptionalBooleanClaim(String claimName) {
+        JwtAuthenticationToken authenticationToken = getJwtTokenOrNull();
+        if (authenticationToken == null) {
+            return null;
+        }
+        Object v = authenticationToken.getTokenAttributes().get(claimName);
+        if (v instanceof Boolean b) {
+            return b;
+        }
+        if (v instanceof String s) {
+            if ("true".equalsIgnoreCase(s)) {
+                return true;
+            }
+            if ("false".equalsIgnoreCase(s)) {
+                return false;
+            }
+        }
+        return null;
+    }
+
+    private static JwtAuthenticationToken getJwtTokenOrNull() {
+        var context = SecurityContextHolder.getContext();
+        if (context == null || context.getAuthentication() == null) {
+            return null;
+        }
+        if (!(context.getAuthentication() instanceof JwtAuthenticationToken token)) {
+            return null;
+        }
+        return token;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Integer> coerceIntList(Object raw) {
+        if (raw == null) {
+            return List.of();
+        }
+        if (raw instanceof List<?> list) {
+            List<Integer> out = new ArrayList<>(list.size());
+            for (Object o : list) {
+                if (o instanceof Number n) {
+                    out.add(n.intValue());
+                } else {
+                    out.add(-1);
+                }
+            }
+            return List.copyOf(out);
+        }
+        if (raw instanceof int[] arr) {
+            List<Integer> out = new ArrayList<>(arr.length);
+            for (int v : arr) {
+                out.add(v);
+            }
+            return out;
+        }
+        return List.of();
     }
 }
