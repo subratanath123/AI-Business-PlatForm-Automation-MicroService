@@ -23,4 +23,14 @@ public class DirectProductUpdateRequest {
     private String status;          // active | draft | archived
     private String seoTitle;        // global.title_tag metafield
     private String seoDescription;  // global.description_tag metafield
+
+    // ── Optional draft-editor fields (single default variant + images) ───────
+    // Only used by the draft editor today. When persisted via updateDraft()
+    // these are stored on the local ProductItem and later flushed to Shopify
+    // when the draft is published.
+    private String  price;
+    private String  compareAtPrice;
+    private String  sku;
+    private Integer inventoryQuantity;
+    private java.util.List<String> images;
 }

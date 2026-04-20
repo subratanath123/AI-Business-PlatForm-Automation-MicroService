@@ -12,6 +12,7 @@ import net.ai.chatbot.utils.AuthUtils;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -130,6 +131,79 @@ public class ShopifyIntegrationController {
             return ResponseEntity.ok(jobToMap(job));
         } catch (Exception e) {
             log.error("Upload job creation failed for user {}: {}", userId, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Parse raw file content using AI to extract product information.
+     * Returns a list of parsed products ready for enhancement.
+     */
+    @PostMapping("/v1/api/shopify/parse")
+    public ResponseEntity<Map<String, Object>> parseProducts(
+            @RequestBody Map<String, String> request) {
+        String userId = AuthUtils.getUserId();
+        String content = request.get("content");
+        String fileName = request.get("fileName");
+        
+        if (content == null || content.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Content is required"));
+        }
+        
+        try {
+            List<ShopifyProductDto> products = shopifyIntegrationService.parseProductsWithAI(content, fileName);
+            return ResponseEntity.ok(Map.of(
+                    "products", products,
+                    "count", products.size()
+            ));
+        } catch (Exception e) {
+            log.error("AI parsing failed for user {}: {}", userId, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Generate a product draft from one or more images using GPT-4 Vision.
+     * Accepts a body of the form {@code { "images": ["data:image/png;base64,...", "https://..."] }}.
+     * All images are treated as different views of the same product and the
+     * response mirrors {@code /parse} so the frontend flow is identical.
+     */
+    @PostMapping("/v1/api/shopify/parse-image")
+    public ResponseEntity<Map<String, Object>> parseProductsFromImages(
+            @RequestBody Map<String, Object> request) {
+        String userId = AuthUtils.getUserId();
+
+        Object imagesObj = request.get("images");
+        if (!(imagesObj instanceof List<?> rawList) || rawList.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "At least one image is required"));
+        }
+
+        // Hard caps so a bad client can't drown the OpenAI call.
+        final int MAX_IMAGES = 6;
+        final int MAX_URL_LEN = 12 * 1024 * 1024; // ~12 MB data URL per image
+
+        List<String> imageUrls = new ArrayList<>();
+        for (Object o : rawList) {
+            if (!(o instanceof String s) || s.isBlank()) continue;
+            if (s.length() > MAX_URL_LEN) {
+                return ResponseEntity.badRequest().body(Map.of(
+                        "error", "One of the images is too large. Please keep each image under 8 MB."));
+            }
+            imageUrls.add(s);
+            if (imageUrls.size() >= MAX_IMAGES) break;
+        }
+        if (imageUrls.isEmpty()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "No valid images supplied"));
+        }
+
+        try {
+            List<ShopifyProductDto> products = shopifyIntegrationService.parseProductsFromImages(imageUrls);
+            return ResponseEntity.ok(Map.of(
+                    "products", products,
+                    "count", products.size()
+            ));
+        } catch (Exception e) {
+            log.error("Image-to-product parsing failed for user {}: {}", userId, e.getMessage());
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }
@@ -262,6 +336,173 @@ public class ShopifyIntegrationController {
             return ResponseEntity.ok(Map.of("message", "Product updated successfully", "shopifyId", shopifyId));
         } catch (Exception e) {
             log.error("updateProductDirect failed for user {} product {}: {}", userId, shopifyId, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Product images (attach / remove)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Attach a new image to a product. Accepts a publicly reachable URL
+     * (e.g. from the internal Asset library) plus optional alt text and position.
+     *
+     * Body: { "src": "https://...", "alt": "optional", "position": 1 (optional) }
+     */
+    @PostMapping("/v1/api/shopify/products/{shopifyId}/images")
+    public ResponseEntity<Map<String, Object>> addProductImage(
+            @PathVariable String shopifyId,
+            @RequestBody Map<String, Object> request) {
+        String userId = AuthUtils.getUserId();
+        try {
+            String src = request.get("src") == null ? null : request.get("src").toString();
+            String alt = request.get("alt") == null ? null : request.get("alt").toString();
+            Integer position = null;
+            Object posObj = request.get("position");
+            if (posObj instanceof Number) position = ((Number) posObj).intValue();
+            else if (posObj instanceof String && !((String) posObj).isBlank()) {
+                try { position = Integer.parseInt((String) posObj); } catch (NumberFormatException ignored) { }
+            }
+
+            if (src == null || src.isBlank()) {
+                return ResponseEntity.badRequest().body(Map.of("error", "'src' (image URL) is required"));
+            }
+
+            Map<String, Object> image = shopifyIntegrationService.addProductImage(
+                    userId, shopifyId, src, alt, position);
+            return ResponseEntity.ok(image);
+        } catch (Exception e) {
+            log.error("addProductImage failed for user {} product {}: {}", userId, shopifyId, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Remove an image from a product.
+     */
+    @DeleteMapping("/v1/api/shopify/products/{shopifyId}/images/{imageId}")
+    public ResponseEntity<Map<String, Object>> deleteProductImage(
+            @PathVariable String shopifyId,
+            @PathVariable String imageId) {
+        String userId = AuthUtils.getUserId();
+        try {
+            shopifyIntegrationService.deleteProductImage(userId, shopifyId, imageId);
+            return ResponseEntity.ok(Map.of(
+                    "message", "Image deleted",
+                    "shopifyId", shopifyId,
+                    "imageId", imageId));
+        } catch (Exception e) {
+            log.error("deleteProductImage failed for user {} product {} image {}: {}",
+                    userId, shopifyId, imageId, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Drafts & local product lifecycle
+    //   DRAFT         — uploaded locally, never pushed to Shopify
+    //   SYNCED        — in Shopify and local matches
+    //   PENDING_SYNC  — in Shopify but has local unpushed edits
+    //   PUBLISHED     — just pushed to Shopify (settles to SYNCED on next sync)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Fetch a draft / local product item in the same shape as {@link #getProductDetails},
+     * so the frontend can reuse the product detail editor.
+     */
+    @GetMapping("/v1/api/shopify/drafts/{jobId}/{localId}")
+    public ResponseEntity<Map<String, Object>> getDraft(
+            @PathVariable String jobId,
+            @PathVariable String localId) {
+        String userId = AuthUtils.getUserId();
+        try {
+            return ResponseEntity.ok(shopifyIntegrationService.getDraft(userId, jobId, localId));
+        } catch (Exception e) {
+            log.error("getDraft failed for user {} job {} localId {}: {}",
+                    userId, jobId, localId, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Update a draft's editable fields. Does NOT push to Shopify — that's a
+     * separate publish step. For SYNCED/PUBLISHED items this marks the draft
+     * as PENDING_SYNC so the user can see there are unpushed edits.
+     */
+    @PutMapping("/v1/api/shopify/drafts/{jobId}/{localId}")
+    public ResponseEntity<Map<String, Object>> updateDraft(
+            @PathVariable String jobId,
+            @PathVariable String localId,
+            @RequestBody DirectProductUpdateRequest request) {
+        String userId = AuthUtils.getUserId();
+        try {
+            return ResponseEntity.ok(
+                    shopifyIntegrationService.updateDraft(userId, jobId, localId, request));
+        } catch (Exception e) {
+            log.error("updateDraft failed for user {} job {} localId {}: {}",
+                    userId, jobId, localId, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Run AI enhancement on a single draft item. Writes the enhanced fields
+     * onto the draft and returns the updated detail map so the frontend can
+     * refresh the form in-place.
+     */
+    @PostMapping("/v1/api/shopify/drafts/{jobId}/{localId}/enhance")
+    public ResponseEntity<Map<String, Object>> enhanceDraft(
+            @PathVariable String jobId,
+            @PathVariable String localId) {
+        String userId = AuthUtils.getUserId();
+        try {
+            return ResponseEntity.ok(
+                    shopifyIntegrationService.enhanceDraft(userId, jobId, localId));
+        } catch (Exception e) {
+            log.error("enhanceDraft failed for user {} job {} localId {}: {}",
+                    userId, jobId, localId, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Publish a draft to Shopify. Creates the product if DRAFT, or pushes
+     * pending edits if PENDING_SYNC. On success the item's lifecycleStatus
+     * becomes PUBLISHED and shopifyId is set.
+     */
+    @PostMapping("/v1/api/shopify/drafts/{jobId}/{localId}/publish")
+    public ResponseEntity<Map<String, Object>> publishDraft(
+            @PathVariable String jobId,
+            @PathVariable String localId) {
+        String userId = AuthUtils.getUserId();
+        try {
+            return ResponseEntity.ok(
+                    shopifyIntegrationService.publishDraft(userId, jobId, localId));
+        } catch (Exception e) {
+            log.error("publishDraft failed for user {} job {} localId {}: {}",
+                    userId, jobId, localId, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Delete a DRAFT (local-only) item from a job. Does not affect Shopify.
+     */
+    @DeleteMapping("/v1/api/shopify/drafts/{jobId}/{localId}")
+    public ResponseEntity<Map<String, Object>> deleteDraft(
+            @PathVariable String jobId,
+            @PathVariable String localId) {
+        String userId = AuthUtils.getUserId();
+        try {
+            shopifyIntegrationService.deleteDraft(userId, jobId, localId);
+            return ResponseEntity.ok(Map.of(
+                    "message", "Draft deleted",
+                    "jobId", jobId,
+                    "localId", localId));
+        } catch (Exception e) {
+            log.error("deleteDraft failed for user {} job {} localId {}: {}",
+                    userId, jobId, localId, e.getMessage());
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         }
     }

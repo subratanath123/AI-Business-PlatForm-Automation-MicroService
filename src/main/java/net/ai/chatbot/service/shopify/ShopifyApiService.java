@@ -274,6 +274,163 @@ public class ShopifyApiService {
         }
     }
 
+    // ── Create product (for publishing drafts) ────────────────────────────────
+
+    /**
+     * Create a brand-new product in Shopify. Used when publishing a draft that
+     * was uploaded/created locally and has no Shopify ID yet.
+     *
+     * @return the newly-assigned Shopify product ID
+     */
+    public String createProduct(String shopDomain, String accessToken, ShopifyProductDto draft) {
+        String url = buildBaseUrl(shopDomain) + "/products.json";
+
+        Map<String, Object> product = new LinkedHashMap<>();
+        if (notBlank(draft.getTitle()))       product.put("title",        draft.getTitle());
+        if (notBlank(draft.getBodyHtml()))    product.put("body_html",    draft.getBodyHtml());
+        if (notBlank(draft.getVendor()))      product.put("vendor",       draft.getVendor());
+        if (notBlank(draft.getProductType())) product.put("product_type", draft.getProductType());
+        if (notBlank(draft.getTags()))        product.put("tags",         draft.getTags());
+        if (notBlank(draft.getHandle()))      product.put("handle",       draft.getHandle());
+        if (notBlank(draft.getStatus()))      product.put("status",       draft.getStatus());
+
+        // Default-variant pricing / SKU / inventory. Shopify requires a product
+        // to have at least one variant, so we always emit one here even if the
+        // user left all fields blank — Shopify will fill sensible defaults.
+        boolean hasVariantData =
+                notBlank(draft.getPrice()) ||
+                notBlank(draft.getCompareAtPrice()) ||
+                notBlank(draft.getSku()) ||
+                draft.getInventoryQuantity() != null;
+        if (hasVariantData) {
+            Map<String, Object> variant = new LinkedHashMap<>();
+            if (notBlank(draft.getPrice()))          variant.put("price",            draft.getPrice());
+            if (notBlank(draft.getCompareAtPrice())) variant.put("compare_at_price", draft.getCompareAtPrice());
+            if (notBlank(draft.getSku()))            variant.put("sku",              draft.getSku());
+            if (draft.getInventoryQuantity() != null) {
+                variant.put("inventory_quantity", draft.getInventoryQuantity());
+                // "shopify" tells Shopify to track inventory itself; required
+                // for the inventory_quantity field to actually take effect.
+                variant.put("inventory_management", "shopify");
+            }
+            product.put("variants", List.of(variant));
+        }
+
+        // Initial images: Shopify fetches each `src` from its own servers so the
+        // URL must be publicly reachable (typical for Supabase CDN / S3 public).
+        if (draft.getImages() != null && !draft.getImages().isEmpty()) {
+            List<Map<String, Object>> images = new ArrayList<>();
+            int position = 1;
+            for (String src : draft.getImages()) {
+                if (src == null || src.isBlank()) continue;
+                Map<String, Object> img = new LinkedHashMap<>();
+                img.put("src",      src);
+                img.put("position", position++);
+                if (notBlank(draft.getTitle())) img.put("alt", draft.getTitle());
+                images.add(img);
+            }
+            if (!images.isEmpty()) product.put("images", images);
+        }
+
+        List<Map<String, Object>> metafields = new ArrayList<>();
+        if (notBlank(draft.getSeoTitle())) {
+            metafields.add(buildMetafield("global", "title_tag",
+                    draft.getSeoTitle(), "single_line_text_field"));
+        }
+        if (notBlank(draft.getSeoDescription())) {
+            metafields.add(buildMetafield("global", "description_tag",
+                    draft.getSeoDescription(), "single_line_text_field"));
+        }
+        if (!metafields.isEmpty()) product.put("metafields", metafields);
+
+        if (product.isEmpty() || !product.containsKey("title")) {
+            throw new RuntimeException("Cannot publish draft: title is required");
+        }
+
+        try {
+            String body = OBJECT_MAPPER.writeValueAsString(Map.of("product", product));
+            String response = post(url, accessToken, body);
+            String newId = OBJECT_MAPPER.readTree(response).path("product").path("id").asText();
+            if (newId == null || newId.isBlank()) {
+                throw new RuntimeException("Shopify returned no product id");
+            }
+            log.info("Created Shopify product {} ({})", newId, draft.getTitle());
+            return newId;
+        } catch (Exception e) {
+            log.error("Failed to create Shopify product '{}': {}", draft.getTitle(), e.getMessage());
+            throw new RuntimeException("Failed to create Shopify product: " + e.getMessage());
+        }
+    }
+
+    // ── Product images ────────────────────────────────────────────────────────
+
+    /**
+     * Attach an image to an existing Shopify product by public URL.
+     * Shopify will fetch and host the image itself; the {@code src} must be reachable
+     * from Shopify's servers (typical for assets stored on Supabase / S3 / CDN).
+     *
+     * @return the created image as a map with id / src / alt / position, or {@code null}
+     *         if the response could not be parsed.
+     */
+    public Map<String, Object> addProductImage(String shopDomain, String accessToken,
+                                                String shopifyId, String src,
+                                                String alt, Integer position) {
+        if (shopifyId == null || shopifyId.isBlank()) {
+            throw new IllegalArgumentException("shopifyId is required");
+        }
+        if (src == null || src.isBlank()) {
+            throw new IllegalArgumentException("Image src URL is required");
+        }
+
+        String url = buildBaseUrl(shopDomain) + "/products/" + shopifyId + "/images.json";
+
+        Map<String, Object> image = new LinkedHashMap<>();
+        image.put("src", src);
+        if (notBlank(alt)) image.put("alt", alt);
+        if (position != null && position > 0) image.put("position", position);
+
+        try {
+            String body = OBJECT_MAPPER.writeValueAsString(Map.of("image", image));
+            String response = post(url, accessToken, body);
+            JsonNode img = OBJECT_MAPPER.readTree(response).path("image");
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("id",       img.path("id").asText());
+            result.put("src",      img.path("src").asText());
+            result.put("alt",      img.path("alt").isNull() ? "" : img.path("alt").asText());
+            result.put("position", img.path("position").asInt());
+            log.info("Attached image to Shopify product {} (src={})", shopifyId, src);
+            return result;
+        } catch (Exception e) {
+            log.error("Failed to attach image to Shopify product {}: {}", shopifyId, e.getMessage());
+            throw new RuntimeException("Failed to attach image: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Remove an image from a Shopify product by image id.
+     */
+    public void deleteProductImage(String shopDomain, String accessToken,
+                                    String shopifyId, String imageId) {
+        if (shopifyId == null || shopifyId.isBlank() ||
+            imageId == null   || imageId.isBlank()) {
+            throw new IllegalArgumentException("shopifyId and imageId are required");
+        }
+        String url = buildBaseUrl(shopDomain)
+                + "/products/" + shopifyId + "/images/" + imageId + ".json";
+        try {
+            webClientBuilder.build()
+                    .delete().uri(url)
+                    .header("X-Shopify-Access-Token", accessToken)
+                    .retrieve().bodyToMono(String.class).block();
+            log.info("Deleted image {} from Shopify product {}", imageId, shopifyId);
+        } catch (Exception e) {
+            log.error("Failed to delete image {} from Shopify product {}: {}",
+                    imageId, shopifyId, e.getMessage());
+            throw new RuntimeException("Failed to delete image: " + e.getMessage());
+        }
+    }
+
     // ── Webhook management ────────────────────────────────────────────────────
 
     public String registerProductCreatedWebhook(String shopDomain, String accessToken, String callbackUrl) {

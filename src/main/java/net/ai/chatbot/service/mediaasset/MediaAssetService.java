@@ -22,7 +22,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -105,8 +107,9 @@ public class MediaAssetService {
                 mediaAssetDao.save(asset);
                 log.info("Asset uploaded for user {} in folder '{}': {} ({})", userEmail, folderPath, originalFilename, asset.getId());
 
-                // Add to successful uploads
-                uploaded.add(toAssetDto(asset));
+                // Return a fresh signed URL so the caller gets a working link even
+                // when the bucket is private. Falls back to the stored URL on failure.
+                uploaded.add(toAssetDto(asset, freshUrl(asset)));
 
             } catch (Exception e) {
                 log.error("Failed to upload file for user {} in folder '{}': {}", userEmail, folderPath, e.getMessage(), e);
@@ -159,9 +162,14 @@ public class MediaAssetService {
             assetPage = mediaAssetDao.findByUserEmailOrderByCreatedAtDesc(userEmail, pageable);
         }
 
-        // Convert to DTOs
-        List<ListAssetsResponse.AssetDto> assets = assetPage.getContent().stream()
-                .map(this::toListAssetDto)
+        // Refresh every URL in a single batch request. The stored `supabaseUrl`
+        // is treated as a fallback only — for private buckets it may have been
+        // a short-lived SAS URL whose signing key has since expired.
+        List<MediaAsset> pageAssets = assetPage.getContent();
+        Map<String, String> signedByPath = signedUrlsFor(pageAssets);
+
+        List<ListAssetsResponse.AssetDto> assets = pageAssets.stream()
+                .map((a) -> toListAssetDto(a, signedByPath.getOrDefault(a.getObjectPath(), a.getSupabaseUrl())))
                 .collect(Collectors.toList());
 
         // Get total count
@@ -183,7 +191,7 @@ public class MediaAssetService {
                         "Asset not found or you don't have permission to access it"
                 ));
 
-        return toListAssetDto(asset);
+        return toListAssetDto(asset, freshUrl(asset));
     }
 
     /**
@@ -371,15 +379,16 @@ public class MediaAssetService {
     }
 
     /**
-     * Convert MediaAsset to UploadResponse.AssetDto.
+     * Convert MediaAsset to UploadResponse.AssetDto, overriding the stored URL
+     * with a freshly-signed one.
      */
-    private UploadResponse.AssetDto toAssetDto(MediaAsset asset) {
+    private UploadResponse.AssetDto toAssetDto(MediaAsset asset, String urlOverride) {
         return UploadResponse.AssetDto.builder()
                 .id(asset.getId())
                 .fileName(asset.getFileName())
                 .mimeType(asset.getMimeType())
                 .sizeBytes(asset.getSizeBytes())
-                .supabaseUrl(asset.getSupabaseUrl())
+                .supabaseUrl(urlOverride != null ? urlOverride : asset.getSupabaseUrl())
                 .objectPath(asset.getObjectPath())
                 .createdAt(asset.getCreatedAt())
                 .tags(asset.getTags())
@@ -387,18 +396,44 @@ public class MediaAssetService {
     }
 
     /**
-     * Convert MediaAsset to ListAssetsResponse.AssetDto.
+     * Convert MediaAsset to ListAssetsResponse.AssetDto, overriding the stored URL.
      */
-    private ListAssetsResponse.AssetDto toListAssetDto(MediaAsset asset) {
+    private ListAssetsResponse.AssetDto toListAssetDto(MediaAsset asset, String urlOverride) {
         return ListAssetsResponse.AssetDto.builder()
                 .id(asset.getId())
                 .fileName(asset.getFileName())
                 .mimeType(asset.getMimeType())
                 .sizeBytes(asset.getSizeBytes())
-                .supabaseUrl(asset.getSupabaseUrl())
+                .supabaseUrl(urlOverride != null ? urlOverride : asset.getSupabaseUrl())
                 .objectPath(asset.getObjectPath())
                 .createdAt(asset.getCreatedAt())
                 .tags(asset.getTags())
                 .build();
+    }
+
+    /**
+     * Create a fresh signed URL for one asset, falling back to the stored URL
+     * if signing is unavailable (e.g. storage misconfigured, asset lacking objectPath).
+     */
+    private String freshUrl(MediaAsset asset) {
+        if (asset.getObjectPath() == null || asset.getObjectPath().isBlank()) {
+            return asset.getSupabaseUrl();
+        }
+        String signed = supabaseStorage.createSignedUrl(asset.getObjectPath());
+        return signed != null ? signed : asset.getSupabaseUrl();
+    }
+
+    /**
+     * Batch-sign URLs for many assets in one round-trip.
+     * Returns a map keyed by {@code objectPath}; missing entries indicate signing failures.
+     */
+    private Map<String, String> signedUrlsFor(List<MediaAsset> assets) {
+        if (assets == null || assets.isEmpty()) return new HashMap<>();
+        List<String> paths = assets.stream()
+                .map(MediaAsset::getObjectPath)
+                .filter((p) -> p != null && !p.isBlank())
+                .collect(Collectors.toList());
+        if (paths.isEmpty()) return new HashMap<>();
+        return supabaseStorage.createSignedUrls(paths);
     }
 }
