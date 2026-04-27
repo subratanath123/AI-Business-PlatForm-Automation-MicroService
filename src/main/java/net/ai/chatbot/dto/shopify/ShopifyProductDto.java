@@ -12,6 +12,8 @@ import lombok.NoArgsConstructor;
 public class ShopifyProductDto {
     // ── Raw fields from Shopify ──────────────────────────────────────────────
     private String shopifyId;
+    /** WooCommerce product id (populated when this DTO came from a Woo store). */
+    private String wooId;
     private String title;
     private String bodyHtml;
     private String vendor;

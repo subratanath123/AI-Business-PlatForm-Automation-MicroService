@@ -43,6 +43,52 @@ encryption:
 # Webhook auto-enhance uses: {app.base-url}/api/public/shopify/webhook/{userId}
 # Ensure app.base-url is set correctly in production.
 
+# Amazon SP-API Integration
+# Requires an approved Amazon SP-API app (registered in Seller Central):
+#   AMAZON_LWA_APP_ID       — the "application_id" shown on the app dashboard
+#   AMAZON_LWA_CLIENT_ID    — LWA client id (login-with-amazon.com)
+#   AMAZON_LWA_CLIENT_SECRET — LWA client secret
+# OAuth redirect must be registered as: {FRONTEND_URL}/auth/amazon/callback
+# SQS-based push notifications need an SQS queue ARN that grants SP-API
+# (principal 437568002678) SendMessage permission. The queue's messages
+# are then forwarded to {app.base-url}/api/public/amazon/sqs-ingest/{userId}
+# by a lightweight worker or Lambda.
+amazon:
+  lwa:
+    app-id: ${AMAZON_LWA_APP_ID:}
+    client-id: ${AMAZON_LWA_CLIENT_ID:}
+    client-secret: ${AMAZON_LWA_CLIENT_SECRET:}
+
+# eBay Sell API Integration
+# Requires an eBay developer account + a registered app:
+#   EBAY_APP_ID   — the Client ID from your eBay developer dashboard
+#   EBAY_CERT_ID  — the Client Secret ("Cert ID") from your eBay developer dashboard
+#   EBAY_RU_NAME  — the RuName registered in the eBay dashboard whose
+#                   "Your auth accepted URL" points to {FRONTEND_URL}/auth/ebay/callback
+#   EBAY_SANDBOX  — "true" to default new connects to the eBay sandbox, "false" for production
+# Platform notifications need a publicly reachable HTTPS endpoint. We expose
+# {app.base-url}/api/public/ebay/notify/{userId}; callers supply a
+# verification token they also register with eBay.
+ebay:
+  oauth:
+    app-id:   ${EBAY_APP_ID:}
+    cert-id:  ${EBAY_CERT_ID:}
+    ru-name:  ${EBAY_RU_NAME:}
+    sandbox:  ${EBAY_SANDBOX:false}
+
+# AliExpress Open Platform (TOP) — OAuth + gw.api.taobao.com
+# Register an app at https://developers.aliexpress.com — set callback URL to:
+#   {FRONTEND_URL}/auth/aliexpress/callback
+aliexpress:
+  oauth:
+    app-key:       ${ALIEXPRESS_APP_KEY:}
+    app-secret:    ${ALIEXPRESS_APP_SECRET:}
+    redirect-uri:  ${ALIEXPRESS_REDIRECT_URI:}
+    authorize-host: https://oauth.aliexpress.com
+    token-host:     https://oauth.aliexpress.com
+  api:
+    gateway-url: https://gw.api.taobao.com/router/rest
+
 # Supabase Configuration (from config server)
 supabase:
   url: ${supabase.url:}

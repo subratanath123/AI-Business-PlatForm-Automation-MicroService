@@ -52,6 +52,8 @@ public class ProductEnhancementJob {
 
         // ── Raw values ──────────────────────────────────────────────────────
         private String shopifyId;
+        /** WooCommerce product id (present when this item originated from a WC store). */
+        private String wooId;
         private String title;
         private String bodyHtml;
         private String vendor;
