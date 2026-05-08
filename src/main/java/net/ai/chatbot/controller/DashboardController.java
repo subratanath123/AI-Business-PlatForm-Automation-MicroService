@@ -2,7 +2,14 @@ package net.ai.chatbot.controller;
 
 import lombok.extern.slf4j.Slf4j;
 import net.ai.chatbot.dto.dashboard.*;
+import net.ai.chatbot.service.dashboard.AIGenerationsDashboardService;
+import net.ai.chatbot.service.dashboard.AssetsDashboardService;
 import net.ai.chatbot.service.dashboard.DashboardService;
+import net.ai.chatbot.service.dashboard.EcommerceDashboardService;
+import net.ai.chatbot.service.dashboard.KpiStripService;
+import net.ai.chatbot.service.dashboard.SocialDashboardService;
+import net.ai.chatbot.service.dashboard.SubscriptionDashboardService;
+import net.ai.chatbot.service.dashboard.TeamDashboardService;
 import net.ai.chatbot.utils.AuthUtils;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,9 +24,30 @@ import java.util.List;
 public class DashboardController {
 
     private final DashboardService dashboardService;
+    private final KpiStripService kpiStripService;
+    private final SocialDashboardService socialDashboardService;
+    private final AIGenerationsDashboardService aiGenerationsDashboardService;
+    private final EcommerceDashboardService ecommerceDashboardService;
+    private final TeamDashboardService teamDashboardService;
+    private final SubscriptionDashboardService subscriptionDashboardService;
+    private final AssetsDashboardService assetsDashboardService;
 
-    public DashboardController(DashboardService dashboardService) {
+    public DashboardController(DashboardService dashboardService,
+                               KpiStripService kpiStripService,
+                               SocialDashboardService socialDashboardService,
+                               AIGenerationsDashboardService aiGenerationsDashboardService,
+                               EcommerceDashboardService ecommerceDashboardService,
+                               TeamDashboardService teamDashboardService,
+                               SubscriptionDashboardService subscriptionDashboardService,
+                               AssetsDashboardService assetsDashboardService) {
         this.dashboardService = dashboardService;
+        this.kpiStripService = kpiStripService;
+        this.socialDashboardService = socialDashboardService;
+        this.aiGenerationsDashboardService = aiGenerationsDashboardService;
+        this.ecommerceDashboardService = ecommerceDashboardService;
+        this.teamDashboardService = teamDashboardService;
+        this.subscriptionDashboardService = subscriptionDashboardService;
+        this.assetsDashboardService = assetsDashboardService;
     }
 
     /**
@@ -149,6 +177,89 @@ public class DashboardController {
             return ResponseEntity.ok(topUsers);
         } catch (Exception e) {
             log.error("Error fetching top active users", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    // ── New summary endpoints powering the redesigned dashboard ───────────
+
+    /**
+     * Compact KPI strip for the redesigned dashboard's hero section.
+     * Single round-trip; cheap counts only.
+     * GET /v1/api/dashboard/summary
+     */
+    @GetMapping("/summary")
+    public ResponseEntity<KpiStripSummary> getKpiStripSummary() {
+        try {
+            return ResponseEntity.ok(kpiStripService.getSummary());
+        } catch (Exception e) {
+            log.error("Error fetching KPI strip summary", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    /** GET /v1/api/dashboard/social/summary */
+    @GetMapping("/social/summary")
+    public ResponseEntity<SocialDashboardSummary> getSocialSummary() {
+        try {
+            return ResponseEntity.ok(socialDashboardService.getSummary());
+        } catch (Exception e) {
+            log.error("Error fetching social dashboard summary", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    /** GET /v1/api/dashboard/ai-generations/summary */
+    @GetMapping("/ai-generations/summary")
+    public ResponseEntity<AIGenerationsDashboardSummary> getAIGenerationsSummary() {
+        try {
+            return ResponseEntity.ok(aiGenerationsDashboardService.getSummary());
+        } catch (Exception e) {
+            log.error("Error fetching AI generations dashboard summary", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    /** GET /v1/api/dashboard/ecommerce/summary */
+    @GetMapping("/ecommerce/summary")
+    public ResponseEntity<EcommerceDashboardSummary> getEcommerceSummary() {
+        try {
+            return ResponseEntity.ok(ecommerceDashboardService.getSummary());
+        } catch (Exception e) {
+            log.error("Error fetching ecommerce dashboard summary", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    /** GET /v1/api/dashboard/team/summary */
+    @GetMapping("/team/summary")
+    public ResponseEntity<TeamDashboardSummary> getTeamSummary() {
+        try {
+            return ResponseEntity.ok(teamDashboardService.getSummary());
+        } catch (Exception e) {
+            log.error("Error fetching team dashboard summary", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    /** GET /v1/api/dashboard/subscription/summary */
+    @GetMapping("/subscription/summary")
+    public ResponseEntity<SubscriptionDashboardSummary> getSubscriptionSummary() {
+        try {
+            return ResponseEntity.ok(subscriptionDashboardService.getSummary());
+        } catch (Exception e) {
+            log.error("Error fetching subscription dashboard summary", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
+    /** GET /v1/api/dashboard/assets/summary */
+    @GetMapping("/assets/summary")
+    public ResponseEntity<AssetsDashboardSummary> getAssetsSummary() {
+        try {
+            return ResponseEntity.ok(assetsDashboardService.getSummary());
+        } catch (Exception e) {
+            log.error("Error fetching assets dashboard summary", e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
         }
     }
