@@ -43,7 +43,20 @@ public class ApiConfig {
                 .csrf(csrf -> csrf.disable())
                 .cors(cors -> cors.configurationSource(corsConfigurationSource(domainService)))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/v1/api/mcp/**","/actuator/**","/api/social-auth/**", "/api/**","/v1/api/n8n/anonymous/**","/v1/api/public/**")
+                        .requestMatchers(
+                            "/v1/api/mcp/**",
+                            "/actuator/**",
+                            "/api/social-auth/**",
+                            "/api/**",
+                            "/v1/api/n8n/anonymous/**",
+                            "/v1/api/public/**",
+                            "/v1/api/subscriptions/plans",
+                            "/v1/api/subscriptions/plans/**",
+                            "/v1/api/subscription/plans",
+                            "/v1/api/subscription/plans/**",
+                            "/v1/api/content-templates",
+                            "/v1/api/content-templates/**"
+                        )
                         .permitAll()
                         .anyRequest().authenticated()
                 )

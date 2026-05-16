@@ -3,6 +3,7 @@ package net.ai.chatbot.controller.aiproductstudio;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.ai.chatbot.entity.AIProductStudioJob;
+import net.ai.chatbot.service.admin.GuardrailService;
 import net.ai.chatbot.service.aiproductstudio.AIProductStudioService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +23,7 @@ import java.util.Map;
 public class AIProductStudioController {
 
     private final AIProductStudioService productStudioService;
+    private final GuardrailService guardrailService;
 
     @PostMapping("/generate")
     public ResponseEntity<?> generateStudioShot(
@@ -33,8 +35,20 @@ public class AIProductStudioController {
     ) {
         try {
             String userEmail = ((Jwt) authentication.getPrincipal()).getClaim("email");
+            String userId = ((Jwt) authentication.getPrincipal()).getSubject();
             log.info("Generate studio shot request from user: {}, scene: {}, lighting: {}, angle: {}", 
                      userEmail, sceneType, lighting, angle);
+
+            // Guardrail validation
+            GuardrailService.ValidationResult validationResult = guardrailService.validateProductStudio(userId);
+            if (!validationResult.isAllowed()) {
+                log.warn("Product studio blocked by guardrails for user {}: {}", userEmail, validationResult.getMessage());
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of(
+                            "error", "Feature disabled",
+                            "message", validationResult.getMessage()
+                        ));
+            }
 
             if (imageFile.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Image file is required"));

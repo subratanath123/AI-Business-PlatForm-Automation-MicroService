@@ -3,6 +3,7 @@ package net.ai.chatbot.controller.aivideo;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.ai.chatbot.entity.AIVideoJob;
+import net.ai.chatbot.service.admin.GuardrailService;
 import net.ai.chatbot.service.aivideo.AIVideoService;
 import net.ai.chatbot.utils.AuthUtils;
 import org.springframework.http.ResponseEntity;
@@ -18,6 +19,7 @@ import java.util.Map;
 public class AIVideoController {
 
     private final AIVideoService videoService;
+    private final GuardrailService guardrailService;
 
     /**
      * Generate a new AI video
@@ -40,6 +42,7 @@ public class AIVideoController {
     @PostMapping("/generate")
     public ResponseEntity<?> generate(@RequestBody Map<String, Object> request) {
         String userEmail = AuthUtils.getUserEmail();
+        String userId = AuthUtils.getUserId();
         if (userEmail == null) {
             log.warn("Unauthorized video generation attempt");
             return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
@@ -52,6 +55,17 @@ public class AIVideoController {
 
         if (prompt == null || prompt.trim().isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Prompt is required"));
+        }
+
+        // Guardrail validation
+        GuardrailService.ValidationResult validationResult = guardrailService.validateVideoRequest(prompt, duration, userId);
+        if (!validationResult.isAllowed()) {
+            log.warn("Video prompt blocked by guardrails for user {}: {}", userEmail, validationResult.getMessage());
+            return ResponseEntity.status(403).body(Map.of(
+                "error", "Content policy violation",
+                "message", validationResult.getMessage(),
+                "violations", validationResult.getViolations()
+            ));
         }
 
         try {

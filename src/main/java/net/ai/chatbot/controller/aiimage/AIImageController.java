@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.ai.chatbot.entity.AIImageJob;
 import net.ai.chatbot.service.aiimage.AIImageService;
+import net.ai.chatbot.service.admin.GuardrailService;
 import net.ai.chatbot.utils.AuthUtils;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -18,6 +19,7 @@ import java.util.Map;
 public class AIImageController {
 
     private final AIImageService imageService;
+    private final GuardrailService guardrailService;
 
     /**
      * Generate a new AI image
@@ -41,6 +43,7 @@ public class AIImageController {
     @PostMapping("/generate")
     public ResponseEntity<?> generate(@RequestBody Map<String, String> request) {
         String userEmail = AuthUtils.getUserEmail();
+        String userId = AuthUtils.getUserId();
         if (userEmail == null) {
             log.warn("Unauthorized image generation attempt");
             return ResponseEntity.status(401).body(Map.of("error", "Unauthorized"));
@@ -53,6 +56,21 @@ public class AIImageController {
 
         if (prompt == null || prompt.trim().isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "Prompt is required"));
+        }
+
+        // Guardrail validation
+        GuardrailService.ValidationResult validationResult = guardrailService.validateImagePrompt(prompt, userId);
+        if (!validationResult.isAllowed()) {
+            log.warn("Image prompt blocked by guardrails for user {}: {}", userEmail, validationResult.getMessage());
+            return ResponseEntity.status(403).body(Map.of(
+                "error", "Content policy violation",
+                "message", validationResult.getMessage(),
+                "violations", validationResult.getViolations()
+            ));
+        }
+
+        if (validationResult.isWarned()) {
+            log.info("Image prompt warning for user {}: {}", userEmail, validationResult.getMessage());
         }
 
         try {

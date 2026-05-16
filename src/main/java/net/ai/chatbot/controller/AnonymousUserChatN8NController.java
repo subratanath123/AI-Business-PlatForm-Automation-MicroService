@@ -5,6 +5,7 @@ import net.ai.chatbot.dto.Message;
 import net.ai.chatbot.dto.n8n.N8NChatResponse;
 import net.ai.chatbot.entity.ChatBot;
 import net.ai.chatbot.service.aichatbot.ChatBotService;
+import net.ai.chatbot.service.admin.GuardrailService;
 import net.ai.chatbot.service.n8n.GenericN8NService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
@@ -26,6 +27,9 @@ public class AnonymousUserChatN8NController {
     @Autowired
     private ChatBotService chatBotService;
 
+    @Autowired
+    private GuardrailService guardrailService;
+
     @Value("${n8n.webhook.knowledgebase.chat.url}")
     private String webhookUrl;
 
@@ -39,6 +43,19 @@ public class AnonymousUserChatN8NController {
     public ResponseEntity<N8NChatResponse<Object>> sendMessage(
             @RequestHeader(value = "userToken", required = false) String userToken,
             @RequestBody Message message) {
+
+        // Guardrail validation for chat messages
+        String userId = message.getSessionId() != null ? message.getSessionId() : "anonymous";
+        GuardrailService.ValidationResult validationResult = guardrailService.validateContent(
+                message.getMessage(), "CONTENT", userId);
+        
+        if (!validationResult.isAllowed()) {
+            log.warn("Chat message blocked by guardrails: {}", validationResult.getMessage());
+            N8NChatResponse<Object> blockedResponse = new N8NChatResponse<>();
+            blockedResponse.setSuccess(false);
+            blockedResponse.setErrorMessage("Your message was blocked due to content policy violations. Please rephrase and try again.");
+            return ResponseEntity.ok(blockedResponse);
+        }
 
         ChatBot chatBot = chatBotService.getChatBot(message.getChatbotId());
 
@@ -57,6 +74,19 @@ public class AnonymousUserChatN8NController {
             @RequestHeader(value = "userToken", required = false) String userToken,
             @RequestBody Message message) {
         log.info("Anonymous generic chat request received - sessionId: {}", message.getSessionId());
+
+        // Guardrail validation for content generation
+        String userId = message.getSessionId() != null ? message.getSessionId() : "anonymous";
+        GuardrailService.ValidationResult validationResult = guardrailService.validateTextContent(
+                message.getMessage(), userId);
+        
+        if (!validationResult.isAllowed()) {
+            log.warn("Content generation blocked by guardrails: {}", validationResult.getMessage());
+            N8NChatResponse<Object> blockedResponse = new N8NChatResponse<>();
+            blockedResponse.setSuccess(false);
+            blockedResponse.setErrorMessage(validationResult.getMessage());
+            return ResponseEntity.ok(blockedResponse);
+        }
 
         ChatBot chatBot;
         

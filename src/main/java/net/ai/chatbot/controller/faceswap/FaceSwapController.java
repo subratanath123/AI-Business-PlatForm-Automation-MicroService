@@ -3,6 +3,7 @@ package net.ai.chatbot.controller.faceswap;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.ai.chatbot.entity.FaceSwapJob;
+import net.ai.chatbot.service.admin.GuardrailService;
 import net.ai.chatbot.service.faceswap.FaceSwapService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +23,7 @@ import java.util.Map;
 public class FaceSwapController {
 
     private final FaceSwapService faceSwapService;
+    private final GuardrailService guardrailService;
 
     @PostMapping("/swap")
     public ResponseEntity<?> swapFaces(
@@ -31,7 +33,19 @@ public class FaceSwapController {
     ) {
         try {
             String userEmail = ((Jwt) authentication.getPrincipal()).getClaim("email");
+            String userId = ((Jwt) authentication.getPrincipal()).getSubject();
             log.info("Face swap request from user: {}", userEmail);
+
+            // Guardrail validation
+            GuardrailService.ValidationResult validationResult = guardrailService.validateFaceSwap(userId);
+            if (!validationResult.isAllowed()) {
+                log.warn("Face swap blocked by guardrails for user {}: {}", userEmail, validationResult.getMessage());
+                return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                        .body(Map.of(
+                            "error", "Feature disabled",
+                            "message", validationResult.getMessage()
+                        ));
+            }
 
             if (sourceFace.isEmpty() || targetImage.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Both source and target images are required"));

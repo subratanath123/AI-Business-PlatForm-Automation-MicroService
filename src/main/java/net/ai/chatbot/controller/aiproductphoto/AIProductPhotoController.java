@@ -3,6 +3,7 @@ package net.ai.chatbot.controller.aiproductphoto;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.ai.chatbot.entity.AIProductPhotoJob;
+import net.ai.chatbot.service.admin.GuardrailService;
 import net.ai.chatbot.service.aiproductphoto.AIProductPhotoService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +23,7 @@ import java.util.Map;
 public class AIProductPhotoController {
 
     private final AIProductPhotoService productPhotoService;
+    private final GuardrailService guardrailService;
 
     @PostMapping("/generate")
     public ResponseEntity<?> generateProductPhoto(
@@ -32,7 +34,22 @@ public class AIProductPhotoController {
     ) {
         try {
             String userEmail = ((Jwt) authentication.getPrincipal()).getClaim("email");
+            String userId = ((Jwt) authentication.getPrincipal()).getSubject();
             log.info("Generate product photo request from user: {}, backgroundType: {}", userEmail, backgroundType);
+
+            // Guardrail validation for custom prompts
+            if (customPrompt != null && !customPrompt.trim().isEmpty()) {
+                GuardrailService.ValidationResult validationResult = guardrailService.validateImagePrompt(customPrompt, userId);
+                if (!validationResult.isAllowed()) {
+                    log.warn("Product photo prompt blocked by guardrails for user {}: {}", userEmail, validationResult.getMessage());
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                            .body(Map.of(
+                                "error", "Content policy violation",
+                                "message", validationResult.getMessage(),
+                                "violations", validationResult.getViolations()
+                            ));
+                }
+            }
 
             if (imageFile.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Image file is required"));

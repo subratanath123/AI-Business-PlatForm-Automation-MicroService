@@ -6,8 +6,14 @@ import org.springframework.security.oauth2.server.resource.authentication.JwtAut
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 public class AuthUtils {
+
+    private static final Set<String> ADMIN_EMAILS = Set.of(
+            "shuvra.dev9@gmail.com",
+            "admin@jadeai.com"
+    );
 
     /**
      * Get userId from JWT sub (Clerk user ID)
@@ -45,8 +51,27 @@ public class AuthUtils {
         return getEmail();
     }
 
+    /**
+     * Check if the current user is an admin.
+     * First checks against hardcoded admin emails, then can be extended
+     * to check database roles via AdminUserDao.
+     */
     public static boolean isAdmin() {
-        return "shuvra.dev9@gmail.com".equals(getEmail());
+        String email = getEmail();
+        if (email == null) {
+            return false;
+        }
+        return ADMIN_EMAILS.contains(email);
+    }
+
+    /**
+     * Check if a specific email belongs to an admin.
+     */
+    public static boolean isAdminEmail(String email) {
+        if (email == null) {
+            return false;
+        }
+        return ADMIN_EMAILS.contains(email);
     }
 
     public static User getUser() {

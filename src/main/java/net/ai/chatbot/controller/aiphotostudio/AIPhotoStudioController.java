@@ -3,6 +3,7 @@ package net.ai.chatbot.controller.aiphotostudio;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.ai.chatbot.entity.AIPhotoStudioJob;
+import net.ai.chatbot.service.admin.GuardrailService;
 import net.ai.chatbot.service.aiphotostudio.AIPhotoStudioService;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +23,7 @@ import java.util.Map;
 public class AIPhotoStudioController {
 
     private final AIPhotoStudioService photoStudioService;
+    private final GuardrailService guardrailService;
 
     @PostMapping("/edit")
     public ResponseEntity<?> editImage(
@@ -32,10 +34,25 @@ public class AIPhotoStudioController {
     ) {
         try {
             String userEmail = ((Jwt) authentication.getPrincipal()).getClaim("email");
+            String userId = ((Jwt) authentication.getPrincipal()).getSubject();
             log.info("Edit image request from user: {}, editType: {}", userEmail, editType);
 
             if (imageFile.isEmpty()) {
                 return ResponseEntity.badRequest().body(Map.of("error", "Image file is required"));
+            }
+
+            // Guardrail validation for instructions
+            if (instruction != null && !instruction.trim().isEmpty()) {
+                GuardrailService.ValidationResult validationResult = guardrailService.validateImagePrompt(instruction, userId);
+                if (!validationResult.isAllowed()) {
+                    log.warn("Photo edit instruction blocked by guardrails for user {}: {}", userEmail, validationResult.getMessage());
+                    return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                            .body(Map.of(
+                                "error", "Content policy violation",
+                                "message", validationResult.getMessage(),
+                                "violations", validationResult.getViolations()
+                            ));
+                }
             }
 
             String jobId = photoStudioService.createJob(userEmail, imageFile, instruction, editType);

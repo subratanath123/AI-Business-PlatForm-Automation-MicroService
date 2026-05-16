@@ -9,6 +9,7 @@ import net.ai.chatbot.dto.UserChatHistory;
 import net.ai.chatbot.dto.n8n.N8NChatResponse;
 import net.ai.chatbot.entity.ChatBot;
 import net.ai.chatbot.service.aichatbot.ChatBotService;
+import net.ai.chatbot.service.admin.GuardrailService;
 import net.ai.chatbot.service.googlecalendar.ChatbotOwnershipService;
 import net.ai.chatbot.service.n8n.GenericN8NService;
 import net.ai.chatbot.utils.AuthUtils;
@@ -41,6 +42,9 @@ public class AuthenticatedUserChatN8NController {
 
     @Autowired
     private ChatbotOwnershipService chatbotOwnershipService;
+
+    @Autowired
+    private GuardrailService guardrailService;
 
     @Value("${n8n.webhook.knowledgebase.chat.url}")
     private String webhookUrl;
@@ -85,6 +89,23 @@ public class AuthenticatedUserChatN8NController {
     public ResponseEntity<N8NChatResponse<Object>> sendMessage(
             @RequestHeader(value = "userToken", required = false) String userToken,
             @RequestBody Message message) {
+
+        // Guardrail validation
+        String userId = AuthUtils.getUserId();
+        if (userId == null) {
+            userId = message.getSessionId() != null ? message.getSessionId() : "anonymous";
+        }
+        
+        GuardrailService.ValidationResult validationResult = guardrailService.validateContent(
+                message.getMessage(), "CONTENT", userId);
+        
+        if (!validationResult.isAllowed()) {
+            log.warn("Chat message blocked by guardrails: {}", validationResult.getMessage());
+            N8NChatResponse<Object> blockedResponse = new N8NChatResponse<>();
+            blockedResponse.setSuccess(false);
+            blockedResponse.setErrorMessage("Your message was blocked due to content policy violations. Please rephrase and try again.");
+            return ResponseEntity.ok(blockedResponse);
+        }
 
         ChatBot chatBot = chatBotService.getChatBot(message.getChatbotId());
 
