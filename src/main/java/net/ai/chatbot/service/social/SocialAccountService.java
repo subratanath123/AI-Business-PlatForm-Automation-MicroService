@@ -122,6 +122,40 @@ public class SocialAccountService {
     }
 
     /**
+     * Connect Instagram Business/Creator account.
+     * Instagram requires a linked Facebook Page for API access.
+     */
+    @Transactional
+    public InstagramConnectResponse connectInstagram(String userId, InstagramConnectRequest request) {
+        SocialAccount account = SocialAccount.builder()
+                .id(UUID.randomUUID().toString())
+                .userId(userId)
+                .platform("instagram")
+                .connectedAt(new java.util.Date())
+                .accessToken(encryptionUtils.encrypt(request.getPageAccessToken()))
+                .expiresIn(request.getExpiresIn())
+                .instagramAccountId(request.getInstagramAccountId())
+                .instagramUsername(request.getInstagramUsername())
+                .displayName(request.getInstagramDisplayName())
+                .profilePicture(request.getProfilePictureUrl())
+                .connectedFacebookPageId(request.getFacebookPageId())
+                .instagramFollowers(request.getFollowersCount())
+                .build();
+
+        socialAccountDao.save(account);
+        log.info("Instagram account connected for user {}: @{} (ID: {})", 
+                userId, request.getInstagramUsername(), request.getInstagramAccountId());
+
+        return InstagramConnectResponse.builder()
+                .success(true)
+                .accountId(account.getId())
+                .instagramAccountId(request.getInstagramAccountId())
+                .instagramUsername(request.getInstagramUsername())
+                .message("Instagram account connected successfully")
+                .build();
+    }
+
+    /**
      * List all connected accounts for user.
      */
     public ListAccountsResponse listAccounts(String userId) {
@@ -173,6 +207,16 @@ public class SocialAccountService {
                         .accountId(acc.getId())
                         .platform("linkedin")
                         .displayName("LinkedIn - " + acc.getDisplayName())
+                        .build());
+            } else if ("instagram".equals(acc.getPlatform())) {
+                targets.add(SocialTargetResponse.builder()
+                        .targetId(acc.getId())
+                        .accountId(acc.getId())
+                        .platform("instagram")
+                        .displayName("Instagram - @" + acc.getInstagramUsername())
+                        .instagramAccountId(acc.getInstagramAccountId())
+                        .instagramUsername(acc.getInstagramUsername())
+                        .profilePicture(acc.getProfilePicture())
                         .build());
             }
         }
@@ -446,12 +490,28 @@ public class SocialAccountService {
                     .collect(Collectors.toList());
         }
 
-        return SocialAccountResponse.builder()
+        SocialAccountResponse.SocialAccountResponseBuilder builder = SocialAccountResponse.builder()
                 .accountId(acc.getId())
                 .platform(acc.getPlatform())
                 .connectedAt(acc.getConnectedAt() != null ? acc.getConnectedAt().toInstant() : null)
                 .pages(pages)
-                .username(acc.getUsername())
-                .build();
+                .username(acc.getUsername());
+
+        // Add Instagram-specific fields
+        if ("instagram".equals(acc.getPlatform())) {
+            builder.instagramAccountId(acc.getInstagramAccountId())
+                   .instagramUsername(acc.getInstagramUsername())
+                   .displayName(acc.getDisplayName())
+                   .profilePicture(acc.getProfilePicture())
+                   .followersCount(acc.getInstagramFollowers());
+        }
+
+        // Add LinkedIn-specific fields
+        if ("linkedin".equals(acc.getPlatform())) {
+            builder.displayName(acc.getDisplayName())
+                   .profilePicture(acc.getProfilePicture());
+        }
+
+        return builder.build();
     }
 }

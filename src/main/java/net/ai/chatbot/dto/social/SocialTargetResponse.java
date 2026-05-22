@@ -8,7 +8,7 @@ import lombok.Data;
 public class SocialTargetResponse {
 
     /**
-     * Facebook: accountId:pageId | Twitter: accountId
+     * Facebook: accountId:pageId | Twitter/LinkedIn/Instagram: accountId
      */
     private String targetId;
     private String accountId;
@@ -17,4 +17,9 @@ public class SocialTargetResponse {
     private String pageId;   // Facebook
     private String pageName; // Facebook
     private String username; // Twitter
+    
+    // Instagram fields
+    private String instagramAccountId;
+    private String instagramUsername;
+    private String profilePicture;
 }

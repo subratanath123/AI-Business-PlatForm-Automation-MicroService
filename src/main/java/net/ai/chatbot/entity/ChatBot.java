@@ -83,6 +83,9 @@ public class ChatBot {
     @Transient
     private WhatsAppIntegration whatsAppIntegration;
 
+    @Transient
+    private InstagramIntegration instagramIntegration;
+
     /** Set on API responses only: whether the current user may edit this chatbot (not persisted). */
     @Transient
     private Boolean canConfigure;

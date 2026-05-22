@@ -16,6 +16,15 @@ public class SocialAccountResponse {
     private List<PageInfo> pages;  // Facebook
     private String username;       // Twitter
 
+    // Instagram fields
+    private String instagramAccountId;
+    private String instagramUsername;
+    
+    // Shared fields (LinkedIn, Instagram)
+    private String displayName;
+    private String profilePicture;
+    private Long followersCount;
+
     @Data
     @Builder
     public static class PageInfo {

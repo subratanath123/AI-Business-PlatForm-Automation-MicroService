@@ -274,6 +274,32 @@ public class ChatBotService {
     }
 
     /**
+     * Retrieve chatbot from Instagram Account ID
+     */
+    public ChatBot getChatbotFromInstagramAccountId(String instagramAccountId) {
+        log.info("Retrieving chatbot for instagramAccountId: {}", instagramAccountId);
+
+        InstagramIntegration instagramIntegration = getInstagramIntegration(instagramAccountId);
+
+        if (instagramIntegration == null) {
+            return null;
+        }
+
+        ChatBot chatBot = getChatBot(instagramIntegration.chatbotId());
+        chatBot.setInstagramIntegration(instagramIntegration);
+
+        return chatBot;
+    }
+
+    public InstagramIntegration getInstagramIntegration(String instagramAccountId) {
+        InstagramIntegration instagramIntegration = mongoTemplate.findOne(
+                new Query().addCriteria(Criteria.where("instagramAccountId").is(instagramAccountId)),
+                InstagramIntegration.class
+        );
+        return instagramIntegration;
+    }
+
+    /**
      * Utility: merges without duplicates while supporting nulls
      */
     private <T> List<T> mergeList(List<T> existing, List<T> incoming) {

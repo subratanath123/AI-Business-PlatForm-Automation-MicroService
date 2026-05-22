@@ -167,5 +167,22 @@ public class AIChatBotPublicEndpointController {
         }
     }
 
+    /**
+     * Get chatbot by Instagram Account ID (for webhook/n8n lookup)
+     * GET /v1/api/public/chatbot/instagram/{instagramAccountId}
+     */
+    @GetMapping("/chatbot/instagram/{instagramAccountId}")
+    public ResponseEntity<ChatBot> getInstagramSetup(@PathVariable String instagramAccountId) {
+        try {
+            log.info("Getting chatbot for instagramAccountId: {}", instagramAccountId);
+
+            return ResponseEntity.ok(chatBotService.getChatbotFromInstagramAccountId(instagramAccountId));
+
+        } catch (Exception e) {
+            log.error("Error getting Instagram setup", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+
 }
 

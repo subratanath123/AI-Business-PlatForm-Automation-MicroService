@@ -12,7 +12,7 @@ import java.util.Date;
 import java.util.List;
 
 /**
- * Connected social media account (Facebook or Twitter).
+ * Connected social media account (Facebook, Twitter, LinkedIn, or Instagram).
  * Stored per userId - users can connect multiple accounts per platform.
  */
 @Document(collection = "social_accounts")
@@ -32,7 +32,7 @@ public class SocialAccount {
     private String userId;
 
     /**
-     * facebook | twitter | linkedin
+     * facebook | twitter | linkedin | instagram
      */
     private String platform;
 
@@ -76,4 +76,25 @@ public class SocialAccount {
      * Profile picture URL
      */
     private String profilePicture;
+
+    // --- Instagram fields ---
+    /**
+     * Instagram Business/Creator Account ID
+     */
+    private String instagramAccountId;
+    
+    /**
+     * Instagram username (handle)
+     */
+    private String instagramUsername;
+    
+    /**
+     * Connected Facebook Page ID (Instagram requires a linked FB page)
+     */
+    private String connectedFacebookPageId;
+    
+    /**
+     * Instagram followers count (cached)
+     */
+    private Long instagramFollowers;
 }

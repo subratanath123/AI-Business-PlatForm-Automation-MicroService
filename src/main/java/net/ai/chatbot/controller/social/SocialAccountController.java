@@ -10,7 +10,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 /**
- * Social Media Suite API - Connect Facebook/Twitter/LinkedIn, list accounts, schedule posts.
+ * Social Media Suite API - Connect Facebook/Twitter/LinkedIn/Instagram, list accounts, schedule posts.
  * Base URL: https://subratapc.net
  * All endpoints require: Authorization: Bearer &lt;clerk_jwt&gt;
  * userId resolved from JWT sub
@@ -22,6 +22,24 @@ import org.springframework.web.bind.annotation.*;
 public class SocialAccountController {
 
     private final SocialAccountService socialAccountService;
+
+    /**
+     * Connect Instagram Business/Creator Account
+     * POST /v1/api/social-accounts/instagram
+     * 
+     * Instagram requires:
+     * - A Facebook Page connected to the Instagram Business/Creator account
+     * - Page access token with instagram_basic and instagram_content_publish permissions
+     */
+    @PostMapping("/instagram")
+    public ResponseEntity<InstagramConnectResponse> connectInstagram(
+            @Valid @RequestBody InstagramConnectRequest request) {
+        String userId = AuthUtils.getUserId();
+        if (userId == null) {
+            return ResponseEntity.status(401).build();
+        }
+        return ResponseEntity.ok(socialAccountService.connectInstagram(userId, request));
+    }
 
     /**
      * 1) Connect Facebook Account (store long-lived token + pages)
@@ -80,7 +98,7 @@ public class SocialAccountController {
 
     /**
      * 5) List Posting Targets (dropdown in Create Post)
-     * GET /v1/api/social-accounts/targets?platform=facebook|twitter|linkedin
+     * GET /v1/api/social-accounts/targets?platform=facebook|twitter|linkedin|instagram
      */
     @GetMapping("/targets")
     public ResponseEntity<ListTargetsResponse> listTargets(
