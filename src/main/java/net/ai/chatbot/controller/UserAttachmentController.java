@@ -51,11 +51,13 @@ public class UserAttachmentController {
                 .chatbotId(userId) // Using chatbotId field to store userId
                 .type(file.getContentType())
                 .size(file.getSize())
+                .length(file.getSize())
                 .data(file.getBytes())
                 .uploadedAt(new Date())
                 .build();
 
         AttachmentStorageResult result = attachmentStorageService.storeAttachmentInMongoDB(attachment, userId);
+        result.setDownloadUrl("/v1/api/user/attachments/download/" + result.getFileId());
 
         log.info("User {} uploaded file: {}", userId, result.getFileId());
 

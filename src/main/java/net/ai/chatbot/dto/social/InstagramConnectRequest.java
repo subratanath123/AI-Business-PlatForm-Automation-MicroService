@@ -69,4 +69,9 @@ public class InstagramConnectRequest {
      * Token expiry in seconds
      */
     private Long expiresIn;
+
+    /**
+     * Whether to auto-subscribe the page to webhooks for receiving DMs
+     */
+    private Boolean autoSubscribeWebhook;
 }

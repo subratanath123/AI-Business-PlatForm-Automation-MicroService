@@ -64,4 +64,7 @@ public class SupportTicket {
 
     private Integer satisfactionRating;
     private String feedbackComment;
+
+    /** Stable Message-ID of the first outbound email, used for threading all subsequent emails. */
+    private String emailThreadMessageId;
 }

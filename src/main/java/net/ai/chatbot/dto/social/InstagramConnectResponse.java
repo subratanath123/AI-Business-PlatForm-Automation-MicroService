@@ -19,4 +19,5 @@ public class InstagramConnectResponse {
     private String instagramAccountId;
     private String instagramUsername;
     private String message;
+    private Boolean webhookSubscribed;
 }

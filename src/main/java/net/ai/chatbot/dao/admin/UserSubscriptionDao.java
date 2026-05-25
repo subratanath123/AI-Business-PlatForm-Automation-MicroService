@@ -35,16 +35,36 @@ public class UserSubscriptionDao {
         return Optional.ofNullable(mongoTemplate.findById(id, UserSubscription.class));
     }
 
+    public Optional<UserSubscription> findByStripeSubscriptionId(String stripeSubscriptionId) {
+        Query query = new Query(Criteria.where("stripeSubscriptionId").is(stripeSubscriptionId));
+        return Optional.ofNullable(mongoTemplate.findOne(query, UserSubscription.class));
+    }
+
     public Optional<UserSubscription> findActiveByUserId(String userId) {
         Query query = new Query(Criteria.where("userId").is(userId)
-                .and("status").in(SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIAL));
-        return Optional.ofNullable(mongoTemplate.findOne(query, UserSubscription.class));
+                .and("status").in(SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIAL))
+                .with(Sort.by(Sort.Direction.DESC, "createdAt"));
+        List<UserSubscription> active = mongoTemplate.find(query, UserSubscription.class);
+        if (active.isEmpty()) {
+            return Optional.empty();
+        }
+        // If multiple active rows exist, prefer a paid plan over FREE
+        return active.stream()
+                .filter(s -> s.getPlanCode() != null && !"FREE".equalsIgnoreCase(s.getPlanCode()))
+                .findFirst()
+                .or(() -> Optional.of(active.get(0)));
     }
 
     public List<UserSubscription> findByUserId(String userId) {
         Query query = new Query(Criteria.where("userId").is(userId))
                 .with(Sort.by(Sort.Direction.DESC, "createdAt"));
         return mongoTemplate.find(query, UserSubscription.class);
+    }
+
+    /** True if the user has ever had a subscription row for this plan code (any status). */
+    public boolean existsByUserIdAndPlanCode(String userId, String planCode) {
+        Query query = new Query(Criteria.where("userId").is(userId).and("planCode").is(planCode));
+        return mongoTemplate.exists(query, UserSubscription.class);
     }
 
     public List<UserSubscription> findAll(int page, int size, SubscriptionStatus status) {

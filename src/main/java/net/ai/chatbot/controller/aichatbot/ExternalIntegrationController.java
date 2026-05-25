@@ -10,6 +10,7 @@ import net.ai.chatbot.service.integration.InstagramIntegrationService;
 import net.ai.chatbot.service.integration.MessengerIntegrationService;
 import net.ai.chatbot.service.integration.WhatsAppIntegrationService;
 import net.ai.chatbot.utils.AuthUtils;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -25,6 +26,9 @@ public class ExternalIntegrationController {
     private final MessengerIntegrationService messengerIntegrationService;
     private final WhatsAppIntegrationService whatsAppIntegrationService;
     private final InstagramIntegrationService instagramIntegrationService;
+
+    @Value("${meta.oauth-callback-secret:}")
+    private String metaOAuthCallbackSecret;
 
     public ExternalIntegrationController(MessengerIntegrationService messengerIntegrationService,
                                          WhatsAppIntegrationService whatsAppIntegrationService,
@@ -343,6 +347,107 @@ public class ExternalIntegrationController {
                     .body(ChatBotCreationResponse.builder()
                             .status("FAILED")
                             .message("Failed to delete Instagram setup: " + e.getMessage())
+                            .build());
+        }
+    }
+
+    /**
+     * One-Click Connect for Instagram - Creates/updates integration with OAuth credentials
+     * POST /v1/api/chatbot/instagram/{chatbotId}/one-click-connect
+     * 
+     * This endpoint is called from the OAuth callback to automatically set up
+     * the Instagram integration with minimal user input.
+     */
+    @PostMapping("/instagram/{chatbotId}/one-click-connect")
+    public ResponseEntity<ChatBotCreationResponse> oneClickInstagramConnect(
+            @PathVariable String chatbotId,
+            @RequestBody InstagramIntegration instagramIntegration) {
+        try {
+            String userEmail = AuthUtils.getEmail();
+
+            log.info("One-click Instagram connect for chatbot: {} by user: {}", chatbotId, userEmail);
+
+            // Set the chatbotId and ensure it's enabled
+            InstagramIntegration integration = InstagramIntegration.builder()
+                    .chatbotId(chatbotId)
+                    .accountName(instagramIntegration.accountName())
+                    .instagramAccountId(instagramIntegration.instagramAccountId())
+                    .instagramUsername(instagramIntegration.instagramUsername())
+                    .connectedPageId(instagramIntegration.connectedPageId())
+                    .accessToken(instagramIntegration.accessToken())
+                    .webhookVerifyToken(instagramIntegration.webhookVerifyToken())
+                    .enabled(true)
+                    .build();
+
+            InstagramIntegration savedIntegration = instagramIntegrationService
+                    .createOrUpdateInstagramIntegration(integration, userEmail);
+
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(ChatBotCreationResponse.builder()
+                            .id(savedIntegration.id())
+                            .status("SUCCESS")
+                            .message("Instagram connected successfully via OAuth! Your chatbot is now ready to respond to Instagram DMs.")
+                            .createdAt(new Date())
+                            .createdBy(userEmail)
+                            .build());
+
+        } catch (Exception e) {
+            log.error("Error in one-click Instagram connect", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ChatBotCreationResponse.builder()
+                            .status("FAILED")
+                            .message("Failed to connect Instagram: " + e.getMessage())
+                            .build());
+        }
+    }
+
+    /**
+     * Public server-to-server callback used by the Next.js Meta OAuth route.
+     * It must be signed with META_OAUTH_CALLBACK_SECRET and does not use Clerk.
+     */
+    @PostMapping("/instagram/{chatbotId}/oauth-callback")
+    public ResponseEntity<ChatBotCreationResponse> instagramOAuthCallbackConnect(
+            @PathVariable String chatbotId,
+            @RequestHeader(value = "X-Meta-OAuth-Callback-Secret", required = false) String callbackSecret,
+            @RequestBody InstagramIntegration instagramIntegration) {
+        try {
+            if (metaOAuthCallbackSecret == null || metaOAuthCallbackSecret.isBlank()
+                    || callbackSecret == null || !metaOAuthCallbackSecret.equals(callbackSecret)) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(ChatBotCreationResponse.builder()
+                                .status("FAILED")
+                                .message("Invalid OAuth callback secret")
+                                .build());
+            }
+
+            InstagramIntegration integration = InstagramIntegration.builder()
+                    .chatbotId(chatbotId)
+                    .accountName(instagramIntegration.accountName())
+                    .instagramAccountId(instagramIntegration.instagramAccountId())
+                    .instagramUsername(instagramIntegration.instagramUsername())
+                    .connectedPageId(instagramIntegration.connectedPageId())
+                    .accessToken(instagramIntegration.accessToken())
+                    .webhookVerifyToken(instagramIntegration.webhookVerifyToken())
+                    .enabled(true)
+                    .build();
+
+            InstagramIntegration savedIntegration = instagramIntegrationService
+                    .createOrUpdateInstagramIntegrationFromOAuth(integration);
+
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(ChatBotCreationResponse.builder()
+                            .id(savedIntegration.id())
+                            .status("SUCCESS")
+                            .message("Instagram connected successfully via OAuth.")
+                            .createdAt(new Date())
+                            .createdBy("meta-oauth-callback")
+                            .build());
+        } catch (Exception e) {
+            log.error("Error in Instagram OAuth callback connect", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ChatBotCreationResponse.builder()
+                            .status("FAILED")
+                            .message("Failed to connect Instagram: " + e.getMessage())
                             .build());
         }
     }

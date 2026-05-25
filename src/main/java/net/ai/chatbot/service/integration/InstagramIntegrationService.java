@@ -95,6 +95,36 @@ public class InstagramIntegrationService {
     }
 
     /**
+     * Create or update an Instagram integration from the Meta OAuth callback.
+     * This bypasses Clerk request context because Meta redirects back to a public callback route.
+     */
+    @Transactional
+    public InstagramIntegration createOrUpdateInstagramIntegrationFromOAuth(InstagramIntegration instagramIntegration) {
+        log.info("Creating/updating Instagram setup from OAuth callback for chatbot: {}",
+                instagramIntegration.chatbotId());
+
+        validateChatbotId(instagramIntegration.chatbotId());
+        validateRequiredFields(instagramIntegration);
+
+        Query existingQuery = new Query(Criteria.where("chatbotId").is(instagramIntegration.chatbotId()));
+        InstagramIntegration existingIntegration = mongoTemplate.findOne(existingQuery, InstagramIntegration.class);
+
+        InstagramIntegration integrationToSave = InstagramIntegration.builder()
+                .id(existingIntegration != null ? existingIntegration.id() : null)
+                .chatbotId(instagramIntegration.chatbotId())
+                .accountName(instagramIntegration.accountName())
+                .instagramAccountId(instagramIntegration.instagramAccountId())
+                .instagramUsername(instagramIntegration.instagramUsername())
+                .connectedPageId(instagramIntegration.connectedPageId())
+                .accessToken(instagramIntegration.accessToken())
+                .webhookVerifyToken(instagramIntegration.webhookVerifyToken())
+                .enabled(true)
+                .build();
+
+        return mongoTemplate.save(integrationToSave);
+    }
+
+    /**
      * Get Instagram integration by chatbot ID
      */
     public Optional<InstagramIntegration> getInstagramIntegrationByChatbotId(String chatbotId, String userEmail) {

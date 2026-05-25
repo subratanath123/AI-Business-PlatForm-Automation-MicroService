@@ -13,6 +13,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 @Slf4j
@@ -21,6 +22,7 @@ import java.util.UUID;
 public class SupportTicketService {
 
     private final SupportTicketDao supportTicketDao;
+    private final SupportTicketEmailNotificationService supportTicketEmailNotificationService;
 
     public SupportTicket createTicket(CreateTicketRequest request) {
         String userId = AuthUtils.getUserId();
@@ -55,7 +57,9 @@ public class SupportTicketService {
         ticket.getMessages().add(initialMessage);
 
         log.info("Creating support ticket {} for user {}", ticket.getTicketNumber(), userEmail);
-        return supportTicketDao.save(ticket);
+        SupportTicket savedTicket = supportTicketDao.save(ticket);
+        supportTicketEmailNotificationService.notifyTicketCreated(savedTicket);
+        return savedTicket;
     }
 
     public SupportTicket getTicketById(String ticketId) {
@@ -134,7 +138,13 @@ public class SupportTicketService {
         }
 
         log.info("Updating ticket {} with status {}", ticket.getTicketNumber(), ticket.getStatus());
-        return supportTicketDao.save(ticket);
+        SupportTicket savedTicket = supportTicketDao.save(ticket);
+
+        if (request.getStatus() == TicketStatus.RESOLVED) {
+            supportTicketEmailNotificationService.notifyTicketResolved(savedTicket);
+        }
+
+        return savedTicket;
     }
 
     public SupportTicket addMessage(String ticketId, TicketMessageRequest request, boolean isAdmin) {
@@ -163,7 +173,43 @@ public class SupportTicketService {
         }
 
         log.info("Adding message to ticket {} by {}", ticket.getTicketNumber(), userEmail);
-        return supportTicketDao.save(ticket);
+        SupportTicket savedTicket = supportTicketDao.save(ticket);
+        supportTicketEmailNotificationService.notifyTicketReply(savedTicket, message);
+        return savedTicket;
+    }
+
+    public Optional<SupportTicket> addEmailReply(String ticketNumber,
+                                                 String senderEmail,
+                                                 String senderName,
+                                                 String content,
+                                                 boolean isAdmin) {
+        Optional<SupportTicket> ticketOptional = supportTicketDao.findByTicketNumber(ticketNumber);
+        if (ticketOptional.isEmpty()) {
+            log.warn("Inbound email reply ignored. Ticket number not found: {}", ticketNumber);
+            return Optional.empty();
+        }
+
+        SupportTicket ticket = ticketOptional.get();
+        TicketMessage message = TicketMessage.builder()
+                .id(UUID.randomUUID().toString())
+                .senderId("email:" + senderEmail)
+                .senderEmail(senderEmail)
+                .senderName(senderName)
+                .isAdmin(isAdmin)
+                .content(content)
+                .sentAt(Instant.now())
+                .isRead(false)
+                .build();
+
+        ticket.getMessages().add(message);
+
+        if (isAdmin && ticket.getStatus() == TicketStatus.OPEN) {
+            ticket.setStatus(TicketStatus.IN_PROGRESS);
+        }
+
+        SupportTicket savedTicket = supportTicketDao.save(ticket);
+        supportTicketEmailNotificationService.notifyTicketReply(savedTicket, message);
+        return Optional.of(savedTicket);
     }
 
     public SupportTicket submitFeedback(String ticketId, Integer rating, String comment) {

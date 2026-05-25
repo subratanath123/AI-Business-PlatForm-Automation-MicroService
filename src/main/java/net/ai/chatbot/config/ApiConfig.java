@@ -55,7 +55,10 @@ public class ApiConfig {
                             "/v1/api/subscription/plans",
                             "/v1/api/subscription/plans/**",
                             "/v1/api/content-templates",
-                            "/v1/api/content-templates/**"
+                            "/v1/api/content-templates/**",
+                            "/v1/api/chatbot/instagram/*/oauth-callback",
+                            "/v1/api/payments/stripe/webhook",
+                            "/v1/api/payments/stripe/config"
                         )
                         .permitAll()
                         .anyRequest().authenticated()

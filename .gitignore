@@ -35,3 +35,13 @@ out/
 
 ### VS Code ###
 .vscode/
+
+### Local secrets / runtime config ###
+.env
+.env.*
+/application-local.properties
+/application-secret.properties
+src/main/resources/application-local.properties
+src/main/resources/application-secret.properties
+src/main/resources/*-secret.properties
+src/main/resources/*-local.properties

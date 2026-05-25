@@ -1,32 +1,31 @@
 package net.ai.chatbot.service.dashboard;
 
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import net.ai.chatbot.dao.admin.SubscriptionPlanDao;
+import net.ai.chatbot.dao.admin.UserSubscriptionDao;
+import net.ai.chatbot.dto.admin.SubscriptionPlan;
+import net.ai.chatbot.dto.admin.UserSubscription;
 import net.ai.chatbot.dto.dashboard.SubscriptionDashboardSummary;
-import net.ai.chatbot.dto.user.SubscriptionSnapshotData;
-import net.ai.chatbot.entity.UserBusinessProfile;
 import net.ai.chatbot.utils.AuthUtils;
-import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeFormatter;
+
 /**
- * Reads the subscription snapshot from the {@code user_business_profiles}
- * collection (id = Clerk user id) for the dashboard subscription card.
- *
- * <p>This is intentionally a read of the cached snapshot only — it does not
- * call Stripe or any other billing provider. Returns
- * {@code hasSubscription = false} when the profile or snapshot is missing.
+ * Reads the active subscription for the current user directly from the
+ * {@code user_subscriptions} collection. Always up-to-date regardless of
+ * how the subscription was created (Stripe webhook, free plan activation, etc.).
  */
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class SubscriptionDashboardService {
 
-    private final MongoTemplate mongoTemplate;
-
-    public SubscriptionDashboardService(MongoTemplate mongoTemplate) {
-        this.mongoTemplate = mongoTemplate;
-    }
+    private final UserSubscriptionDao userSubscriptionDao;
+    private final SubscriptionPlanDao subscriptionPlanDao;
 
     public SubscriptionDashboardSummary getSummary() {
         String userId = AuthUtils.getUserId();
@@ -34,24 +33,38 @@ public class SubscriptionDashboardService {
             return SubscriptionDashboardSummary.builder().hasSubscription(false).build();
         }
 
-        UserBusinessProfile profile = mongoTemplate.findOne(
-                new Query(Criteria.where("_id").is(userId)),
-                UserBusinessProfile.class);
+        UserSubscription sub = userSubscriptionDao.findActiveByUserId(userId).orElse(null);
 
-        if (profile == null || profile.getSubscription() == null) {
+        if (sub == null) {
             return SubscriptionDashboardSummary.builder().hasSubscription(false).build();
         }
 
-        SubscriptionSnapshotData snapshot = profile.getSubscription();
-        boolean hasAny = snapshot.getPlanId() != null
-                || snapshot.getBillingStatus() != null
-                || snapshot.getCurrentPeriodEnd() != null;
+        String planName = sub.getPlanName();
+        String planCode = sub.getPlanCode();
+        if ((planName == null || planName.isBlank()) && sub.getPlanId() != null) {
+            SubscriptionPlan plan = subscriptionPlanDao.findById(sub.getPlanId()).orElse(null);
+            if (plan != null) {
+                if (planName == null || planName.isBlank()) {
+                    planName = plan.getName();
+                }
+                if (planCode == null || planCode.isBlank()) {
+                    planCode = plan.getPlanCode();
+                }
+            }
+        }
 
         return SubscriptionDashboardSummary.builder()
-                .hasSubscription(hasAny)
-                .planId(snapshot.getPlanId())
-                .billingStatus(snapshot.getBillingStatus())
-                .currentPeriodEnd(snapshot.getCurrentPeriodEnd())
+                .hasSubscription(true)
+                .planId(sub.getPlanId())
+                .planName(planName)
+                .planCode(planCode)
+                .billingStatus(sub.getStatus() != null ? sub.getStatus().name() : null)
+                .currentPeriodEnd(formatInstant(sub.getEndDate()))
                 .build();
+    }
+
+    private String formatInstant(Instant instant) {
+        if (instant == null) return null;
+        return DateTimeFormatter.ISO_LOCAL_DATE.withZone(ZoneOffset.UTC).format(instant);
     }
 }

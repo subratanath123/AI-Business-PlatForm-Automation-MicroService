@@ -7,10 +7,13 @@ import net.ai.chatbot.dao.admin.UserSubscriptionDao;
 import net.ai.chatbot.dto.admin.PricingType;
 import net.ai.chatbot.dto.admin.SubscriptionPlan;
 import net.ai.chatbot.dto.admin.SubscriptionStatus;
+import net.ai.chatbot.dto.admin.SwitchPlanResult;
 import net.ai.chatbot.dto.admin.UserSubscription;
 import net.ai.chatbot.dto.admin.request.CreatePlanRequest;
+import net.ai.chatbot.service.payment.StripeProductSyncService;
 import net.ai.chatbot.utils.AuthUtils;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StringUtils;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -26,6 +29,7 @@ public class SubscriptionPlanService {
 
     private final SubscriptionPlanDao subscriptionPlanDao;
     private final UserSubscriptionDao userSubscriptionDao;
+    private final StripeProductSyncService stripeProductSyncService;
 
     public SubscriptionPlan createPlan(CreatePlanRequest request) {
         if (subscriptionPlanDao.existsByPlanCode(request.getPlanCode())) {
@@ -78,7 +82,14 @@ public class SubscriptionPlanService {
                 .build();
 
         log.info("Creating subscription plan: {}", plan.getPlanCode());
-        return subscriptionPlanDao.save(plan);
+        SubscriptionPlan saved = subscriptionPlanDao.save(plan);
+
+        // Auto-create Stripe Product + Prices and save IDs back
+        if (stripeProductSyncService.syncPlanToStripe(saved)) {
+            saved = subscriptionPlanDao.save(saved);
+        }
+
+        return saved;
     }
 
     public SubscriptionPlan getPlanById(String id) {
@@ -158,7 +169,14 @@ public class SubscriptionPlanService {
         plan.setPaypalAnnualPlanId(request.getPaypalAnnualPlanId());
 
         log.info("Updating subscription plan: {}", plan.getPlanCode());
-        return subscriptionPlanDao.save(plan);
+        SubscriptionPlan saved = subscriptionPlanDao.save(plan);
+
+        // Sync name/price changes to Stripe and persist any updated IDs
+        if (stripeProductSyncService.syncPlanToStripe(saved)) {
+            saved = subscriptionPlanDao.save(saved);
+        }
+
+        return saved;
     }
 
     public void setActive(String id, boolean isActive) {
@@ -181,6 +199,30 @@ public class SubscriptionPlanService {
 
     public List<UserSubscription> getUserSubscriptionHistory(String userId) {
         return userSubscriptionDao.findByUserId(userId);
+    }
+
+    /**
+     * Switch plan without a new Stripe checkout when allowed (downgrade to free,
+     * return to a plan the user had before, or lateral/downgrade between paid tiers).
+     */
+    public SwitchPlanResult switchPlan(String userId, String userEmail, String planId) {
+        SubscriptionPlan plan = getPlanById(planId);
+        boolean targetIsFree = isFreePlan(plan);
+
+        if (!targetIsFree && !userSubscriptionDao.existsByUserIdAndPlanCode(userId, plan.getPlanCode())) {
+            return SwitchPlanResult.requiresCheckout();
+        }
+
+        UserSubscription sub = subscribeUserToPlan(userId, userEmail, planId, null);
+        return SwitchPlanResult.success(sub);
+    }
+
+    private static boolean isFreePlan(SubscriptionPlan plan) {
+        BigDecimal monthly = plan.getMonthlyPrice();
+        BigDecimal annual = plan.getAnnualPrice();
+        boolean noMonthly = monthly == null || monthly.compareTo(BigDecimal.ZERO) <= 0;
+        boolean noAnnual = annual == null || annual.compareTo(BigDecimal.ZERO) <= 0;
+        return noMonthly && noAnnual && !StringUtils.hasText(plan.getPriceNote());
     }
 
     public UserSubscription subscribeUserToPlan(String userId, String userEmail, String planId, String promoCode) {

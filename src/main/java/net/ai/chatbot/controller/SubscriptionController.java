@@ -6,6 +6,9 @@ import net.ai.chatbot.dao.admin.PromoCodeDao;
 import net.ai.chatbot.dao.admin.SubscriptionPlanDao;
 import net.ai.chatbot.dto.admin.PromoCode;
 import net.ai.chatbot.dto.admin.SubscriptionPlan;
+import net.ai.chatbot.dto.admin.SwitchPlanResult;
+import net.ai.chatbot.dto.admin.UserSubscription;
+import net.ai.chatbot.service.admin.SubscriptionPlanService;
 import net.ai.chatbot.service.subscription.PlanLimitValidator;
 import net.ai.chatbot.utils.AuthUtils;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +35,7 @@ public class SubscriptionController {
     private final SubscriptionPlanDao subscriptionPlanDao;
     private final PromoCodeDao promoCodeDao;
     private final PlanLimitValidator planLimitValidator;
+    private final SubscriptionPlanService subscriptionPlanService;
 
     // ═══════════════════════════════════════════════════════════════════════════
     // PUBLIC ENDPOINTS (no auth required)
@@ -219,6 +223,31 @@ public class SubscriptionController {
     // ═══════════════════════════════════════════════════════════════════════════
     // AUTHENTICATED ENDPOINTS
     // ═══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Switch to another plan without a new payment when eligible (e.g. downgrade to Free,
+     * or return to a plan the user previously had).
+     */
+    @PostMapping("/switch-plan")
+    public ResponseEntity<SwitchPlanResult> switchPlan(@RequestBody Map<String, String> body) {
+        String userId = AuthUtils.getUserId();
+        if (userId == null) {
+            return ResponseEntity.status(401).build();
+        }
+        String planId = body.get("planId");
+        if (planId == null || planId.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        String email = AuthUtils.getEmail();
+        try {
+            SwitchPlanResult result = subscriptionPlanService.switchPlan(
+                    userId, email != null ? email : "", planId);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            log.error("Error switching plan for user {}", userId, e);
+            return ResponseEntity.badRequest().build();
+        }
+    }
 
     /**
      * Get current user's usage summary and limits.

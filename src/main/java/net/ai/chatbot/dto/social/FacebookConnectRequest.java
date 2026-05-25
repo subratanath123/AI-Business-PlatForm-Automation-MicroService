@@ -18,6 +18,11 @@ public class FacebookConnectRequest {
 
     private Long expiresIn;
 
+    /**
+     * Whether to auto-subscribe pages to Messenger webhooks
+     */
+    private Boolean autoSubscribeWebhook;
+
     @Data
     public static class FacebookPageDto {
         @NotBlank

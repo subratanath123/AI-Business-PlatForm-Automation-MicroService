@@ -35,6 +35,11 @@ app:
   #   SMTP_HOST, SMTP_PORT, SMTP_USERNAME, SMTP_PASSWORD
   # Team invites also need app.frontend-url (FRONTEND_URL / APP_FRONTEND_URL) for the link in the email.
 
+support:
+  email:
+    # Comma-separated support/admin inboxes that receive new tickets and customer replies.
+    admin-recipients: ${SUPPORT_EMAIL_ADMIN_RECIPIENTS:${ADMIN_SUPPORT_EMAILS:}}
+
 # Encryption Configuration (for storing OAuth tokens securely)
 encryption:
   key: ${ENCRYPTION_KEY:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
@@ -75,6 +80,23 @@ ebay:
     cert-id:  ${EBAY_CERT_ID:}
     ru-name:  ${EBAY_RU_NAME:}
     sandbox:  ${EBAY_SANDBOX:false}
+
+# Stripe Payment Integration
+stripe:
+  secret-key: ${STRIPE_SECRET_KEY:}
+  publishable-key: ${STRIPE_PUBLISHABLE_KEY:}
+  webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+
+# Meta (Facebook/Instagram) Integration
+# For auto-subscribing pages to webhooks during OAuth connect
+meta:
+  app-id: ${FACEBOOK_APP_ID:}
+  app-secret: ${FACEBOOK_APP_SECRET:}
+  oauth-callback-secret: ${META_OAUTH_CALLBACK_SECRET:}
+  # Your n8n webhook URL that receives Instagram/Messenger messages
+  webhook-url: ${META_WEBHOOK_URL:https://n8n.jadeordersmedia.com/webhook/meta-messages}
+  # Verify token for webhook validation (must match what you set in Meta Developer Console)
+  webhook-verify-token: ${META_WEBHOOK_VERIFY_TOKEN:jade_meta_webhook_verify_2024}
 
 # AliExpress Open Platform (TOP) — OAuth + gw.api.taobao.com
 # Register an app at https://developers.aliexpress.com — set callback URL to:

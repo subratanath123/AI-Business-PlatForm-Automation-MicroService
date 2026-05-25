@@ -85,6 +85,8 @@ public class KpiStripService {
                 .aiGenerations30d(aiGenerations30d)
                 .connectedStores(connectedStores)
                 .planId(subscription.getPlanId())
+                .planName(subscription.getPlanName())
+                .planCode(subscription.getPlanCode())
                 .billingStatus(subscription.getBillingStatus())
                 .currentPeriodEnd(subscription.getCurrentPeriodEnd())
                 .build();

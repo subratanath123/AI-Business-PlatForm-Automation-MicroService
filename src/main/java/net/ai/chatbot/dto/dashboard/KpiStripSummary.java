@@ -39,7 +39,13 @@ public class KpiStripSummary {
     /** Subscription plan id ({@code null} when no profile snapshot exists). */
     private String planId;
 
-    /** Subscription billing status ({@code active}, {@code trialing}, …); may be {@code null}. */
+    /** Human-readable plan name (e.g. Starter, Pro). */
+    private String planName;
+
+    /** Stable plan code (e.g. STARTER, PRO). */
+    private String planCode;
+
+    /** Subscription billing status ({@code ACTIVE}, {@code TRIAL}, …); may be {@code null}. */
     private String billingStatus;
 
     /** Subscription period end ISO-8601 string; may be {@code null}. */

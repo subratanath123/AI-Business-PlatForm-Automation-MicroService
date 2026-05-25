@@ -4,6 +4,7 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import net.ai.chatbot.dto.social.*;
+import net.ai.chatbot.service.social.MetaWebhookService;
 import net.ai.chatbot.service.social.SocialAccountService;
 import net.ai.chatbot.utils.AuthUtils;
 import org.springframework.http.ResponseEntity;
@@ -22,6 +23,7 @@ import org.springframework.web.bind.annotation.*;
 public class SocialAccountController {
 
     private final SocialAccountService socialAccountService;
+    private final MetaWebhookService metaWebhookService;
 
     /**
      * Connect Instagram Business/Creator Account
@@ -39,6 +41,101 @@ public class SocialAccountController {
             return ResponseEntity.status(401).build();
         }
         return ResponseEntity.ok(socialAccountService.connectInstagram(userId, request));
+    }
+
+    /**
+     * One-Click Connect for Instagram - Auto-subscribes to webhooks
+     * POST /v1/api/social-accounts/instagram/one-click-connect
+     * 
+     * This endpoint:
+     * 1. Saves the Instagram account credentials
+     * 2. Auto-subscribes the Facebook Page to receive Instagram DM webhooks
+     * 3. Returns success with webhook status
+     */
+    @PostMapping("/instagram/one-click-connect")
+    public ResponseEntity<InstagramConnectResponse> oneClickConnectInstagram(
+            @Valid @RequestBody InstagramConnectRequest request) {
+        String userId = AuthUtils.getUserId();
+        if (userId == null) {
+            return ResponseEntity.status(401).build();
+        }
+        
+        log.info("One-click Instagram connect for user: {}, page: {}", userId, request.getFacebookPageId());
+        
+        // 1. Save the Instagram account
+        InstagramConnectResponse response = socialAccountService.connectInstagram(userId, request);
+        
+        // 2. Auto-subscribe to webhooks if requested
+        if (request.getAutoSubscribeWebhook() != null && request.getAutoSubscribeWebhook()) {
+            try {
+                boolean subscribed = metaWebhookService.subscribePageToInstagramWebhook(
+                        request.getFacebookPageId(),
+                        request.getPageAccessToken()
+                );
+                if (subscribed) {
+                    log.info("Successfully auto-subscribed page {} to Instagram webhooks", request.getFacebookPageId());
+                    response = InstagramConnectResponse.builder()
+                            .success(response.isSuccess())
+                            .accountId(response.getAccountId())
+                            .instagramAccountId(response.getInstagramAccountId())
+                            .instagramUsername(response.getInstagramUsername())
+                            .message(response.getMessage() + " Webhook auto-subscribed successfully!")
+                            .webhookSubscribed(true)
+                            .build();
+                } else {
+                    log.warn("Failed to auto-subscribe page {} to webhooks", request.getFacebookPageId());
+                    response = InstagramConnectResponse.builder()
+                            .success(response.isSuccess())
+                            .accountId(response.getAccountId())
+                            .instagramAccountId(response.getInstagramAccountId())
+                            .instagramUsername(response.getInstagramUsername())
+                            .message(response.getMessage() + " Note: Webhook subscription failed - configure manually in Meta Developer Console.")
+                            .webhookSubscribed(false)
+                            .build();
+                }
+            } catch (Exception e) {
+                log.error("Error during webhook auto-subscription: {}", e.getMessage(), e);
+            }
+        }
+        
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * One-Click Connect for Facebook Messenger - Auto-subscribes to webhooks
+     * POST /v1/api/social-accounts/facebook/one-click-connect
+     */
+    @PostMapping("/facebook/one-click-connect")
+    public ResponseEntity<FacebookConnectResponse> oneClickConnectFacebook(
+            @Valid @RequestBody FacebookConnectRequest request) {
+        String userId = AuthUtils.getUserId();
+        if (userId == null) {
+            return ResponseEntity.status(401).build();
+        }
+        
+        log.info("One-click Facebook connect for user: {}", userId);
+        
+        // 1. Save the Facebook account
+        FacebookConnectResponse response = socialAccountService.connectFacebook(userId, request);
+        
+        // 2. Auto-subscribe each page to Messenger webhooks
+        if (request.getPages() != null && request.getAutoSubscribeWebhook() != null && request.getAutoSubscribeWebhook()) {
+            for (FacebookConnectRequest.FacebookPageDto page : request.getPages()) {
+                try {
+                    boolean subscribed = metaWebhookService.subscribePageToMessengerWebhook(
+                            page.getPageId(),
+                            page.getPageAccessToken()
+                    );
+                    if (subscribed) {
+                        log.info("Successfully auto-subscribed page {} to Messenger webhooks", page.getPageId());
+                    }
+                } catch (Exception e) {
+                    log.error("Error subscribing page {} to webhooks: {}", page.getPageId(), e.getMessage());
+                }
+            }
+        }
+        
+        return ResponseEntity.ok(response);
     }
 
     /**

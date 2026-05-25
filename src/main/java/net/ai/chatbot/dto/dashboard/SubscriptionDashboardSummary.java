@@ -23,12 +23,18 @@ public class SubscriptionDashboardSummary {
     /** Whether a profile snapshot exists. False ⇒ all other fields are null. */
     private boolean hasSubscription;
 
-    /** Stripe price/plan id (or whatever your Stripe setup uses). */
+    /** MongoDB ID of the SubscriptionPlan. */
     private String planId;
 
-    /** Stripe billing status: active / trialing / past_due / canceled / null. */
+    /** Human-readable plan name, e.g. "Pro", "Business". */
+    private String planName;
+
+    /** Plan code, e.g. "PRO", "BUSINESS". */
+    private String planCode;
+
+    /** Billing status: ACTIVE / TRIAL / PAST_DUE / CANCELLED / EXPIRED. */
     private String billingStatus;
 
-    /** ISO-8601 string for the current period end as recorded in the snapshot. */
+    /** ISO-8601 string for the subscription end date. */
     private String currentPeriodEnd;
 }
