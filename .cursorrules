@@ -1,0 +1,45 @@
+# Jade AI Backend - Cursor Rules
+
+## Project Context
+
+This is a Spring Boot backend for the Jade AI platform - an AI-powered business automation suite.
+
+## Documentation
+
+All project documentation is in the `ai-context/` folder (141 files). Key docs:
+
+- **API**: `ai-context/API_DOCUMENTATION.md`, `ai-context/API_QUICK_REFERENCE.md`
+- **Architecture**: `ai-context/ARCHITECTURE_DIAGRAM.md`
+- **Deployment**: `ai-context/DEPLOYMENT.md`, `ai-context/DOCKER_DEPLOYMENT.md`
+- **Features**: Check `ai-context/` for feature-specific docs
+
+## Tech Stack
+
+- Java 17+ with Spring Boot 3.x
+- MongoDB (Spring Data MongoDB)
+- Spring AI with OpenAI
+- Spring Cloud (Config Server, Eureka - optional)
+- Clerk for authentication
+- Supabase for file storage
+
+## Key Packages
+
+- `net.ai.chatbot.controller` - REST controllers
+- `net.ai.chatbot.service` - Business logic
+- `net.ai.chatbot.dao` - MongoDB repositories
+- `net.ai.chatbot.entity` - MongoDB documents
+- `net.ai.chatbot.dto` - Data transfer objects
+- `net.ai.chatbot.config` - Configuration classes
+
+## Coding Standards
+
+- Use Lombok annotations (@Data, @Builder, @RequiredArgsConstructor)
+- Follow REST conventions for controllers
+- Use @Transactional for service methods that modify data
+- Log important operations with Slf4j
+
+## Environment
+
+- Dev profile: `--spring.profiles.active=dev`
+- Local config: `application-local.properties` (gitignored)
+- Sensitive configs: Use environment variables or config server

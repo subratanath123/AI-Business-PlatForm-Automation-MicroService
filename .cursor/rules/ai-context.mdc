@@ -1,0 +1,43 @@
+---
+description: AI Context Documentation - Reference documentation for the Jade AI Backend
+globs:
+  - "**/*.java"
+  - "**/*.yml"
+  - "**/*.yaml"
+  - "**/*.properties"
+alwaysApply: true
+---
+
+# AI Context Documentation
+
+This project has comprehensive documentation in the `ai-context/` folder. When answering questions about this codebase, reference these documents:
+
+## Key Documentation Files
+
+### API & Integration
+- `ai-context/API_DOCUMENTATION.md` - Full API documentation
+- `ai-context/API_DOCUMENTATION_FOR_FRONTEND.md` - Frontend integration guide
+- `ai-context/API_QUICK_REFERENCE.md` - Quick API reference
+- `ai-context/OPENAPI_SPECIFICATION.yaml` - OpenAPI spec
+
+### Architecture
+- `ai-context/ARCHITECTURE_DIAGRAM.md` - System architecture
+- `ai-context/COLLECTION_SEPARATION_ARCHITECTURE.md` - MongoDB collection design
+
+### Features
+- `ai-context/CHATBOT_REPLY_API_IMPLEMENTATION.md` - Chatbot reply system
+- `ai-context/MULTIMODAL_CHAT_API.postman_collection.json` - Multimodal chat API
+- `ai-context/SOCIAL_MEDIA_API_SPEC.md` - Social media automation
+- `ai-context/GOOGLE_CALENDAR_OAUTH_SETUP.md` - Google Calendar integration
+
+### Deployment
+- `ai-context/DEPLOYMENT.md` - Deployment guide
+- `ai-context/DOCKER_DEPLOYMENT.md` - Docker setup
+- `ai-context/RENDER_DEPLOYMENT.md` - Render.com deployment
+
+### Troubleshooting
+- `ai-context/TROUBLESHOOTING_401_ERROR.md` - Auth issues
+- `ai-context/SUPABASE_TROUBLESHOOTING.md` - Supabase issues
+- `ai-context/TWITTER_402_ERROR_GUIDE.md` - Twitter API issues
+
+When working on this codebase, always check the `ai-context/` folder for relevant documentation before making changes.
