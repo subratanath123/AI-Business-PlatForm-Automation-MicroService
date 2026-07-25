@@ -21,20 +21,21 @@ spring:
       profile: dev
       discovery:
         enabled: false
-      enabled: true
+      enabled: false  # Disabled for local dev - using local properties instead
       uri: http://143.198.58.6:8887
       import-check:
         enabled: false
 
   config:
-    import: "optional:configserver:http://143.198.58.6:8887/,optional:file:./application-local.properties"
+    import: "optional:file:./application-local.properties"
 
 eureka:
   instance:
     preferIpAddress: true
   client:
-    registerWithEureka: true
-    fetchRegistry: true
+    registerWithEureka: false  # Disabled for local dev
+    fetchRegistry: false       # Disabled for local dev
+    enabled: false             # Disabled for local dev
     serviceUrl:
       defaultZone: http://143.198.58.6:8761/eureka/
 

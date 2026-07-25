@@ -132,6 +132,56 @@ public class ExternalIntegrationController {
     }
 
     /**
+     * Public server-to-server callback used by the Next.js Meta OAuth route for
+     * Facebook Messenger chatbot setup. It must be signed with
+     * META_OAUTH_CALLBACK_SECRET and does not use Clerk.
+     */
+    @PostMapping("/messenger/{chatbotId}/oauth-callback")
+    public ResponseEntity<ChatBotCreationResponse> messengerOAuthCallbackConnect(
+            @PathVariable String chatbotId,
+            @RequestHeader(value = "X-Meta-OAuth-Callback-Secret", required = false) String callbackSecret,
+            @RequestBody MessengerIntegration messengerIntegration) {
+        try {
+            if (metaOAuthCallbackSecret == null || metaOAuthCallbackSecret.isBlank()
+                    || callbackSecret == null || !metaOAuthCallbackSecret.equals(callbackSecret)) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(ChatBotCreationResponse.builder()
+                                .status("FAILED")
+                                .message("Invalid OAuth callback secret")
+                                .build());
+            }
+
+            MessengerIntegration integration = MessengerIntegration.builder()
+                    .chatbotId(chatbotId)
+                    .pageName(messengerIntegration.pageName())
+                    .pageId(messengerIntegration.pageId())
+                    .accessToken(messengerIntegration.accessToken())
+                    .verifyToken(messengerIntegration.verifyToken())
+                    .enabled(true)
+                    .build();
+
+            MessengerIntegration savedIntegration = messengerIntegrationService
+                    .createOrUpdateMessengerIntegrationFromOAuth(integration);
+
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(ChatBotCreationResponse.builder()
+                            .id(savedIntegration.id())
+                            .status("SUCCESS")
+                            .message("Facebook Messenger connected successfully via OAuth.")
+                            .createdAt(new Date())
+                            .createdBy("meta-oauth-callback")
+                            .build());
+        } catch (Exception e) {
+            log.error("Error in Messenger OAuth callback connect", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ChatBotCreationResponse.builder()
+                            .status("FAILED")
+                            .message("Failed to connect Facebook Messenger: " + e.getMessage())
+                            .build());
+        }
+    }
+
+    /**
      * Create a new WhatsApp Setup configuration
      * POST /v1/api/chatbot/whatsapp/setup
      */
@@ -158,6 +208,60 @@ public class ExternalIntegrationController {
                     .body(ChatBotCreationResponse.builder()
                             .status("FAILED")
                             .message("Failed to create WhatsApp setup: " + e.getMessage())
+                            .build());
+        }
+    }
+
+    /**
+     * Public server-to-server callback used by the Next.js Meta OAuth route for
+     * WhatsApp chatbot setup. It must be signed with META_OAUTH_CALLBACK_SECRET
+     * and does not use Clerk.
+     */
+    @PostMapping("/whatsapp/{chatbotId}/oauth-callback")
+    public ResponseEntity<ChatBotCreationResponse> whatsAppOAuthCallbackConnect(
+            @PathVariable String chatbotId,
+            @RequestHeader(value = "X-Meta-OAuth-Callback-Secret", required = false) String callbackSecret,
+            @RequestBody WhatsAppIntegration whatsAppIntegration) {
+        try {
+            if (metaOAuthCallbackSecret == null || metaOAuthCallbackSecret.isBlank()
+                    || callbackSecret == null || !metaOAuthCallbackSecret.equals(callbackSecret)) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(ChatBotCreationResponse.builder()
+                                .status("FAILED")
+                                .message("Invalid OAuth callback secret")
+                                .build());
+            }
+
+            WhatsAppIntegration integration = WhatsAppIntegration.builder()
+                    .chatbotId(chatbotId)
+                    .name(whatsAppIntegration.name())
+                    .businessAccountId(whatsAppIntegration.businessAccountId())
+                    .phoneNumberId(whatsAppIntegration.phoneNumberId())
+                    .phoneNumber(whatsAppIntegration.phoneNumber())
+                    .appId(whatsAppIntegration.appId())
+                    .appSecret(whatsAppIntegration.appSecret())
+                    .accessToken(whatsAppIntegration.accessToken())
+                    .webhookVerifyToken(whatsAppIntegration.webhookVerifyToken())
+                    .enabled(true)
+                    .build();
+
+            WhatsAppIntegration savedIntegration = whatsAppIntegrationService
+                    .createOrUpdateWhatsAppIntegrationFromOAuth(integration);
+
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(ChatBotCreationResponse.builder()
+                            .id(savedIntegration.id())
+                            .status("SUCCESS")
+                            .message("WhatsApp connected successfully via OAuth.")
+                            .createdAt(new Date())
+                            .createdBy("meta-oauth-callback")
+                            .build());
+        } catch (Exception e) {
+            log.error("Error in WhatsApp OAuth callback connect", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ChatBotCreationResponse.builder()
+                            .status("FAILED")
+                            .message("Failed to connect WhatsApp: " + e.getMessage())
                             .build());
         }
     }

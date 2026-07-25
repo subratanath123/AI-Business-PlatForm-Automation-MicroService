@@ -39,9 +39,24 @@ out/
 ### Local secrets / runtime config ###
 .env
 .env.*
-/application-local.properties
-/application-secret.properties
+.env.local
+*.local.properties
+*.secret.properties
+*-local.properties
+*-secret.properties
+application-local.properties
+application-secret.properties
+application-attachments.properties
 src/main/resources/application-local.properties
 src/main/resources/application-secret.properties
 src/main/resources/*-secret.properties
 src/main/resources/*-local.properties
+src/main/resources/*-attachments.properties
+
+### Sensitive config files ###
+**/secrets/
+**/credentials/
+*.pem
+*.key
+*.p12
+*.jks

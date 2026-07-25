@@ -101,6 +101,44 @@ public class MessengerIntegrationService {
     }
 
     /**
+     * Create or update Messenger integration from the trusted Meta OAuth callback.
+     * The controller authenticates this path with META_OAUTH_CALLBACK_SECRET, so
+     * this method does not require a Clerk user email.
+     */
+    @Transactional
+    public MessengerIntegration createOrUpdateMessengerIntegrationFromOAuth(MessengerIntegration messengerIntegration) {
+        log.info("Creating/updating Messenger setup from OAuth callback for chatbot: {}",
+                messengerIntegration.chatbotId());
+
+        validateChatbotId(messengerIntegration.chatbotId());
+        validateRequiredFields(messengerIntegration);
+
+        Query existingQuery = new Query(Criteria.where("chatbotId").is(messengerIntegration.chatbotId()));
+        MessengerIntegration existingIntegration = mongoTemplate.findOne(existingQuery, MessengerIntegration.class);
+
+        Boolean enabledStatus = messengerIntegration.enabled() != null
+                ? messengerIntegration.enabled()
+                : (existingIntegration != null && existingIntegration.enabled() != null
+                    ? existingIntegration.enabled()
+                    : true);
+
+        MessengerIntegration integrationToSave = MessengerIntegration.builder()
+                .id(existingIntegration == null ? null : existingIntegration.id())
+                .chatbotId(messengerIntegration.chatbotId())
+                .pageName(messengerIntegration.pageName())
+                .pageId(messengerIntegration.pageId())
+                .accessToken(messengerIntegration.accessToken())
+                .verifyToken(messengerIntegration.verifyToken())
+                .enabled(enabledStatus)
+                .build();
+
+        MessengerIntegration savedIntegration = mongoTemplate.save(integrationToSave);
+        log.info("Messenger OAuth setup completed for chatbot: {} with integration ID: {}",
+                messengerIntegration.chatbotId(), savedIntegration.id());
+        return savedIntegration;
+    }
+
+    /**
      * Get messenger integration by chatbot ID
      *
      * @param chatbotId The chatbot ID

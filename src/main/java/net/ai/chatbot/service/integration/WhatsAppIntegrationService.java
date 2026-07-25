@@ -109,6 +109,48 @@ public class WhatsAppIntegrationService {
     }
 
     /**
+     * Create or update WhatsApp integration from the trusted Meta OAuth callback.
+     * The controller authenticates this path with META_OAUTH_CALLBACK_SECRET, so
+     * this method does not require a Clerk user email.
+     */
+    @Transactional
+    public WhatsAppIntegration createOrUpdateWhatsAppIntegrationFromOAuth(WhatsAppIntegration whatsAppIntegration) {
+        log.info("Creating/updating WhatsApp setup from OAuth callback for chatbot: {}",
+                whatsAppIntegration.chatbotId());
+
+        validateChatbotId(whatsAppIntegration.chatbotId());
+        validateRequiredFields(whatsAppIntegration);
+
+        Query existingQuery = new Query(Criteria.where("chatbotId").is(whatsAppIntegration.chatbotId()));
+        WhatsAppIntegration existingIntegration = mongoTemplate.findOne(existingQuery, WhatsAppIntegration.class);
+
+        Boolean enabledStatus = whatsAppIntegration.enabled() != null
+                ? whatsAppIntegration.enabled()
+                : (existingIntegration != null && existingIntegration.enabled() != null
+                    ? existingIntegration.enabled()
+                    : true);
+
+        WhatsAppIntegration integrationToSave = WhatsAppIntegration.builder()
+                .id(existingIntegration == null ? null : existingIntegration.id())
+                .name(whatsAppIntegration.name())
+                .businessAccountId(whatsAppIntegration.businessAccountId())
+                .chatbotId(whatsAppIntegration.chatbotId())
+                .phoneNumberId(whatsAppIntegration.phoneNumberId())
+                .phoneNumber(whatsAppIntegration.phoneNumber())
+                .appId(whatsAppIntegration.appId())
+                .appSecret(whatsAppIntegration.appSecret())
+                .accessToken(whatsAppIntegration.accessToken())
+                .webhookVerifyToken(whatsAppIntegration.webhookVerifyToken())
+                .enabled(enabledStatus)
+                .build();
+
+        WhatsAppIntegration savedIntegration = mongoTemplate.save(integrationToSave);
+        log.info("WhatsApp OAuth setup completed for chatbot: {} with integration ID: {}",
+                whatsAppIntegration.chatbotId(), savedIntegration.id());
+        return savedIntegration;
+    }
+
+    /**
      * Get WhatsApp integration by chatbot ID
      *
      * @param chatbotId The chatbot ID
