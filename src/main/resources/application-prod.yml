@@ -19,7 +19,7 @@ spring:
     bootstrap:
       enabled: false
     config:
-      profile: prod
+      profile: dev
       discovery:
         enabled: false
       enabled: true
