@@ -4,6 +4,7 @@ server:
     include-message: always
     include-binding-errors: always
     include-stacktrace: always
+
 spring:
   application:
     name: OpenAiChatService
@@ -18,23 +19,77 @@ spring:
     bootstrap:
       enabled: false
     config:
-      profile: dev
+      profile: prod
       discovery:
         enabled: false
-      enabled: true
+      enabled: false  # Disabled - using env vars instead
       uri: http://143.198.58.6:8887
       import-check:
         enabled: false
 
-  config:
-    import: "optional:configserver:http://143.198.58.6:8887/,optional:file:./application-local.properties"
+  # MongoDB - REQUIRED (set via environment variables)
+  data:
+    mongodb:
+      uri: ${MONGODB_URI}
+      database: ${MONGODB_DATABASE:JadeAIBot}
+    redis:
+      host: ${REDIS_HOST}
+      port: ${REDIS_PORT:18550}
+      username: ${REDIS_USERNAME:default}
+      password: ${REDIS_PASSWORD}
+
+  # OpenAI - REQUIRED
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY}
+      base-url: https://api.openai.com
+
+# N8N Config
+n8n:
+  webhook:
+    knowledgebase:
+      train:
+        url: ${N8N_TRAIN_URL:https://n8n.jadeordersmedia.com/webhook/cacb416b-286a-4524-9b29-9d8a81bb5864}
+      chat:
+        url: ${N8N_CHAT_URL:https://n8n.jadeordersmedia.com/webhook/c813c234-f702-4078-b692-9df37dbf54be}
+
+# Supabase
+supabase:
+  url: ${SUPABASE_URL}
+  service-role-key: ${SUPABASE_SERVICE_ROLE_KEY}
+  bucket: ${SUPABASE_BUCKET:social-media-assets}
+
+# Pinecone
+pinecone:
+  apiKey: ${PINECONE_API_KEY}
+  environment: ${PINECONE_ENV:us-east-1}
+  indexName: ${PINECONE_INDEX:jadeaibot}
+
+# AWS
+spring.cloud.aws:
+  region:
+    static: ${AWS_REGION:us-east-1}
+  credentials:
+    access-key: ${AWS_ACCESS_KEY}
+    secret-key: ${AWS_SECRET_KEY}
+  sqs:
+    endpoint: ${AWS_SQS_ENDPOINT}
+
+aws:
+  cloudfront:
+    public:
+      key:
+        id: ${CLOUDFRONT_KEY_ID}
+    distribution:
+      domain: ${CLOUDFRONT_DOMAIN}
 
 eureka:
   instance:
     preferIpAddress: true
   client:
-    registerWithEureka: true
-    fetchRegistry: true
+    registerWithEureka: false
+    fetchRegistry: false
+    enabled: false
     serviceUrl:
       defaultZone: http://143.198.58.6:8761/eureka/
 
@@ -42,6 +97,6 @@ logging:
   level:
     org:
       springframework:
-        cloud: DEBUG
-    com.amazonaws: DEBUG
-    io.awspring.cloud: DEBUG
+        cloud: INFO
+    com.amazonaws: WARN
+    io.awspring.cloud: WARN
