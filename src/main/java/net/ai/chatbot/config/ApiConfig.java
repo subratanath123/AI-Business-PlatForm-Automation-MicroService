@@ -21,10 +21,11 @@ public class ApiConfig {
      */
     @Bean
     @Order(1)
-    public SecurityFilterChain mcpSecurityFilterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain mcpSecurityFilterChain(HttpSecurity http, DomainService domainService) throws Exception {
         http
                 .securityMatcher("/mcp", "/mcp/**")
                 .csrf(csrf -> csrf.disable())
+                .cors(cors -> cors.configurationSource(corsConfigurationSource(domainService)))
                 .authorizeHttpRequests(auth -> auth
                         .anyRequest().permitAll()
                 );
@@ -80,16 +81,24 @@ public class ApiConfig {
             @Override
             public CorsConfiguration getCorsConfiguration(HttpServletRequest request) {
                 CorsConfiguration config = new CorsConfiguration();
-                String origin = request.getHeader("Origin");
-
-                if (origin != null && DomainService.isAllowedOrigin(origin)) {
-                    config.addAllowedOrigin(origin);
-                    config.setAllowCredentials(true);
-                    config.addAllowedHeader("*");
-                    config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
-                    config.setAllowedHeaders(List.of("Authorization", "Content-Type"));
-                    config.addAllowedMethod("*");
-                }
+                
+                // Allow all origins
+                config.setAllowedOriginPatterns(List.of("*"));
+                
+                // Allow all methods
+                config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS", "HEAD"));
+                
+                // Allow all headers
+                config.setAllowedHeaders(List.of("*"));
+                
+                // Allow credentials
+                config.setAllowCredentials(true);
+                
+                // Expose headers for frontend
+                config.setExposedHeaders(List.of("Authorization", "Content-Disposition", "X-Total-Count"));
+                
+                // Cache preflight response for 1 hour
+                config.setMaxAge(3600L);
 
                 return config;
             }
