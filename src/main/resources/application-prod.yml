@@ -35,7 +35,7 @@ spring:
         enabled: false
 
   config:
-    import: "configserver:http://143.198.58.6:8887/"
+    import: "configserver:http://143.198.58.6:8887?profile=dev"
 
 eureka:
   instance:
