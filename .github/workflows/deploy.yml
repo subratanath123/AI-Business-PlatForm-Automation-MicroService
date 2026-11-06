@@ -115,35 +115,34 @@ jobs:
         run: |
           ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} << 'EOF'
             uname -a
-            DEPLOY_DIR="/opt/jade-ai-bot"
-            sudo mkdir -p $DEPLOY_DIR
-            sudo chown -R $USER:$USER $DEPLOY_DIR
-            mkdir -p $DEPLOY_DIR/backups $DEPLOY_DIR/deploy
+            sudo mkdir -p /apps/jade-ai-bot/deployment /apps/jade-ai-bot/backups
+            sudo chown -R $USER:$USER /apps/jade-ai-bot/deployment /apps/jade-ai-bot/backups
           EOF
 
       # rsync's delta transfer only sends the parts of the ~330 MB jar that changed
       # (dependency jars are stored uncompressed inside it). Falls back to the old
       # tarball upload if rsync isn't installed on the droplet.
+      # The runner stages files in deploy/; the droplet receives them directly in
+      # /apps/jade-ai-bot/deployment (jar stays at build/libs/JadeAiBot.jar).
       - name: Transfer deployment files to droplet
         run: |
           TARGET="${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }}"
           if ssh "$TARGET" "command -v rsync" > /dev/null 2>&1; then
-            rsync -rlt --compress --stats deploy/ "$TARGET:/opt/jade-ai-bot/deploy/"
+            rsync -rlt --compress --stats deploy/ "$TARGET:/apps/jade-ai-bot/deployment/"
           else
             echo "rsync not found on droplet, falling back to tar + scp"
-            tar -czf deploy.tar.gz deploy/
+            tar -czf deploy.tar.gz -C deploy .
             scp deploy.tar.gz "$TARGET:/tmp/"
-            ssh "$TARGET" "cd /opt/jade-ai-bot && tar -xzf /tmp/deploy.tar.gz && rm -f /tmp/deploy.tar.gz"
+            ssh "$TARGET" "tar -xzf /tmp/deploy.tar.gz -C /apps/jade-ai-bot/deployment && rm -f /tmp/deploy.tar.gz"
           fi
 
       - name: Deploy on droplet
         run: |
           ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} << 'EOF'
             set -e
-            DEPLOY_DIR="/opt/jade-ai-bot"
             ENVIRONMENT="${ENVIRONMENT:-prod}"
 
-            cd $DEPLOY_DIR/deploy
+            cd /apps/jade-ai-bot/deployment
             ls -la
             chmod +x deploy.sh
             ./deploy.sh prod
