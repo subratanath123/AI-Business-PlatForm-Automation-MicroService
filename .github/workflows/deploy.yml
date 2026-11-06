@@ -107,13 +107,17 @@ jobs:
       - name: Setup SSH
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.DROPLET_SSH }}" > ~/.ssh/id_ed25519
+          chmod 700 ~/.ssh
+          # printf keeps newlines; tr strips CR so a Windows-copied secret is a valid OpenSSH key.
+          printf '%s\n' "${{ secrets.DROPLET_SSH }}" | tr -d '\r' > ~/.ssh/id_ed25519
           chmod 600 ~/.ssh/id_ed25519
-          ssh-keyscan -H ${{ secrets.DROPLET_HOST }} >> ~/.ssh/known_hosts
+          echo "Public key from DROPLET_SSH (this step fails if the secret is not a valid private key):"
+          ssh-keygen -y -f ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.DROPLET_HOST }}" >> ~/.ssh/known_hosts
 
       - name: Prepare deployment directory on droplet
         run: |
-          ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} << 'EOF'
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -T ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} << 'EOF'
             uname -a
             sudo mkdir -p /apps/jade-ai-bot/deployment /apps/jade-ai-bot/backups
             sudo chown -R $USER:$USER /apps/jade-ai-bot/deployment /apps/jade-ai-bot/backups
@@ -127,18 +131,19 @@ jobs:
       - name: Transfer deployment files to droplet
         run: |
           TARGET="${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }}"
-          if ssh "$TARGET" "command -v rsync" > /dev/null 2>&1; then
-            rsync -rlt --compress --stats deploy/ "$TARGET:/apps/jade-ai-bot/deployment/"
+          # $HOME (not ~) because tilde does not expand inside the rsync -e string.
+          if ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes "$TARGET" "command -v rsync" > /dev/null 2>&1; then
+            rsync -rlt --compress --stats -e "ssh -i $HOME/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes" deploy/ "$TARGET:/apps/jade-ai-bot/deployment/"
           else
             echo "rsync not found on droplet, falling back to tar + scp"
             tar -czf deploy.tar.gz -C deploy .
-            scp deploy.tar.gz "$TARGET:/tmp/"
-            ssh "$TARGET" "tar -xzf /tmp/deploy.tar.gz -C /apps/jade-ai-bot/deployment && rm -f /tmp/deploy.tar.gz"
+            scp -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes deploy.tar.gz "$TARGET:/tmp/"
+            ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes "$TARGET" "tar -xzf /tmp/deploy.tar.gz -C /apps/jade-ai-bot/deployment && rm -f /tmp/deploy.tar.gz"
           fi
 
       - name: Deploy on droplet
         run: |
-          ssh ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} << 'EOF'
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -T ${{ secrets.DROPLET_USER }}@${{ secrets.DROPLET_HOST }} << 'EOF'
             set -e
             ENVIRONMENT="${ENVIRONMENT:-prod}"
 
