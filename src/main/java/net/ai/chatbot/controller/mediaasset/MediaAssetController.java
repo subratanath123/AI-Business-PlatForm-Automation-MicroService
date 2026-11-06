@@ -77,7 +77,7 @@ public class MediaAssetController {
             return ResponseEntity.badRequest().body("No files provided");
         }
 
-        UploadResponse response = mediaAssetService.uploadAll(userEmail, files, folderPath);
+        UploadResponse response = mediaAssetService.uploadAll(userEmail, AuthUtils.getUserId(), files, folderPath);
         return ResponseEntity.ok(response);
     }
 

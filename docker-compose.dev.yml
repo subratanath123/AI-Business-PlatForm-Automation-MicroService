@@ -16,6 +16,9 @@ services:
       - SPRING_CLOUD_BOOTSTRAP_ENABLED=false
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    volumes:
+      # Keep Playwright's downloaded Chromium across redeploys instead of re-downloading it per container
+      - playwright-browsers:/root/.cache/ms-playwright
     networks:
       - chatbot-network
     restart: unless-stopped
@@ -29,3 +32,6 @@ services:
 networks:
   chatbot-network:
     driver: bridge
+
+volumes:
+  playwright-browsers:

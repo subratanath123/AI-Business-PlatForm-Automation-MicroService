@@ -53,6 +53,10 @@ src/main/resources/*-secret.properties
 src/main/resources/*-local.properties
 src/main/resources/*-attachments.properties
 
+### Local per-user files ###
+/storage/
+/generated-images/
+
 ### Sensitive config files ###
 **/secrets/
 **/credentials/

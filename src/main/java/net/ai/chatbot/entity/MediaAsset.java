@@ -33,6 +33,12 @@ public class MediaAsset {
     private String userEmail;
 
     /**
+     * Clerk user id (JWT sub) when the upload was authenticated.
+     * Local files live under a sanitized form of this id.
+     */
+    private String userId;
+
+    /**
      * Original filename for display
      */
     private String fileName;

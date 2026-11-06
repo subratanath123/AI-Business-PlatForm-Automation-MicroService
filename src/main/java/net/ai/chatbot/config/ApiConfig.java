@@ -60,6 +60,8 @@ public class ApiConfig {
                             "/v1/api/chatbot/instagram/*/oauth-callback",
                             "/v1/api/chatbot/messenger/*/oauth-callback",
                             "/v1/api/chatbot/whatsapp/*/oauth-callback",
+                            "/v1/api/meta/webhook",
+                            "/v1/api/meta/webhook/**",
                             "/v1/api/payments/stripe/webhook",
                             "/v1/api/payments/stripe/config"
                         )

@@ -14,11 +14,14 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import net.ai.chatbot.service.storage.LocalUserStorageService;
+import net.ai.chatbot.service.storage.SupabaseStorageService;
 import org.springframework.web.client.RestTemplate;
 
-import java.net.URL;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -30,6 +33,8 @@ public class AIImageService {
 
     private final AIImageJobDao jobDao;
     private final MediaAssetDao assetDao;
+    private final SupabaseStorageService supabaseStorage;
+    private final LocalUserStorageService localUserStorage;
     private final RestTemplate restTemplate = new RestTemplate();
 
     @Value("${openai.api.key:}")
@@ -40,10 +45,11 @@ public class AIImageService {
     /**
      * Create a new image generation job
      */
-    public AIImageJob createJob(String userEmail, String prompt, String size, String quality, String style) {
+    public AIImageJob createJob(String userEmail, String userId, String prompt, String size, String quality, String style) {
         AIImageJob job = AIImageJob.builder()
                 .id(UUID.randomUUID().toString())
                 .userEmail(userEmail)
+                .userId(userId)
                 .prompt(prompt)
                 .size(size)
                 .quality(quality)
@@ -79,14 +85,14 @@ public class AIImageService {
             log.info("Starting image generation for job {}", jobId);
 
             // Call OpenAI API
-            String imageUrl = callOpenAI(job.getPrompt(), job.getSize(), job.getQuality(), job.getStyle());
+            GeneratedImage image = callOpenAI(job.getUserEmail(), job.getUserId(), job.getPrompt(), job.getSize(), job.getQuality(), job.getStyle());
 
-            // Save image URL to assets (just metadata, no file download)
-            String assetId = saveToAssets(job.getUserEmail(), imageUrl, job.getPrompt());
+            // Save image URL to assets
+            String assetId = saveToAssets(job.getUserEmail(), job.getUserId(), image);
 
             // Update job as completed
             job.setStatus("completed");
-            job.setImageUrl(imageUrl);
+            job.setImageUrl(image.displayUrl());
             job.setAssetId(assetId);
             job.setCompletedAt(Instant.now());
             jobDao.save(job);
@@ -102,30 +108,31 @@ public class AIImageService {
     }
 
     /**
-     * Call OpenAI DALL-E API
+     * Call the OpenAI image generation API.
+     * Current GPT image models reject the legacy {@code style} field and do not accept {@code dall-e-3}.
      */
-    private String callOpenAI(String prompt, String size, String quality, String style) throws Exception {
+    private GeneratedImage callOpenAI(String userEmail, String userId, String prompt, String size, String quality, String style) throws Exception {
         if (openaiApiKey == null || openaiApiKey.isEmpty()) {
             throw new IllegalStateException("OpenAI API key not configured");
         }
 
-        log.info("Calling OpenAI API - prompt: '{}', size: {}, quality: {}, style: {}", 
-                 prompt.substring(0, Math.min(50, prompt.length())), size, quality, style);
+        String mappedSize = mapSize(size);
+        String mappedQuality = mapQuality(quality);
+        String requestPrompt = promptWithStyleHint(prompt, style);
+
+        log.info("Calling OpenAI API - prompt: '{}', size: {}, quality: {}",
+                 requestPrompt.substring(0, Math.min(50, requestPrompt.length())), mappedSize, mappedQuality);
 
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         headers.set("Authorization", "Bearer " + openaiApiKey);
 
-        Map<String, Object> requestBody = Map.of(
-            "model", "dall-e-3",
-            "prompt", prompt,
-            "n", 1,
-            "size", size,
-            "quality", quality,
-            "style", style
-        );
-
-        log.debug("OpenAI request body: {}", requestBody);
+        Map<String, Object> requestBody = new HashMap<>();
+        requestBody.put("model", "gpt-image-1");
+        requestBody.put("prompt", requestPrompt);
+        requestBody.put("n", 1);
+        requestBody.put("size", mappedSize);
+        requestBody.put("quality", mappedQuality);
 
         HttpEntity<Map<String, Object>> request = new HttpEntity<>(requestBody, headers);
 
@@ -143,22 +150,31 @@ public class AIImageService {
                 throw new Exception("Empty response from OpenAI");
             }
 
-            log.debug("OpenAI response body: {}", response.getBody());
-
             List<Map<String, Object>> data = (List<Map<String, Object>>) response.getBody().get("data");
             if (data == null || data.isEmpty()) {
                 throw new Exception("No image returned from OpenAI");
             }
 
             String imageUrl = (String) data.get(0).get("url");
-            if (imageUrl == null || imageUrl.isEmpty()) {
-                throw new Exception("Invalid image URL from OpenAI");
+            if (imageUrl != null && !imageUrl.isEmpty()) {
+                log.info("Successfully generated image URL");
+                String filename = filenameFor(prompt);
+                return new GeneratedImage(imageUrl, "ai-generated/" + userEmail + "/" + filename, filename, 0L);
             }
 
-            log.info("Successfully generated image, URL: {}", imageUrl.substring(0, Math.min(80, imageUrl.length())));
-            return imageUrl;
+            String b64 = (String) data.get(0).get("b64_json");
+            if (b64 == null || b64.isEmpty()) {
+                throw new Exception("Invalid image data from OpenAI");
+            }
+
+            byte[] pngBytes = Base64.getDecoder().decode(b64);
+            log.info("Successfully generated image ({} bytes)", pngBytes.length);
+            return storeGeneratedPng(userEmail, userId, prompt, pngBytes);
 
         } catch (Exception e) {
+            if (e.getMessage() != null && e.getMessage().startsWith("Generated image could not be stored")) {
+                throw e;
+            }
             log.error("OpenAI API call failed: {} - {}", e.getClass().getName(), e.getMessage());
             if (e.getMessage() != null && e.getMessage().contains("421")) {
                 throw new Exception("OpenAI API endpoint error. Please verify API key and endpoint configuration.");
@@ -168,29 +184,98 @@ public class AIImageService {
     }
 
     /**
-     * Save image URL and metadata to MongoDB (no file download/upload)
+     * GPT image models do not accept {@code style}. Keep the UI choice by describing it in the prompt.
      */
-    private String saveToAssets(String userEmail, String imageUrl, String prompt) throws Exception {
-        try {
-            log.info("Saving AI generated image URL to database for user {}", userEmail);
+    private static String promptWithStyleHint(String prompt, String style) {
+        if (style == null || style.isBlank()) {
+            return prompt;
+        }
+        if ("natural".equalsIgnoreCase(style)) {
+            return prompt + ", natural realistic style";
+        }
+        if ("vivid".equalsIgnoreCase(style)) {
+            return prompt + ", vivid dramatic colors";
+        }
+        return prompt;
+    }
 
-            // Create filename from prompt
-            String filename = prompt.substring(0, Math.min(50, prompt.length()))
+    private static String mapQuality(String quality) {
+        if (quality == null || quality.isBlank()) {
+            return "medium";
+        }
+        return switch (quality.toLowerCase()) {
+            case "hd", "high" -> "high";
+            case "low" -> "low";
+            case "auto" -> "auto";
+            default -> "medium";
+        };
+    }
+
+    private static String mapSize(String size) {
+        if (size == null || size.isBlank()) {
+            return "1024x1024";
+        }
+        return switch (size) {
+            case "1024x1024", "1024x1536", "1536x1024", "auto" -> size;
+            case "1792x1024" -> "1536x1024";
+            case "1024x1792" -> "1024x1536";
+            default -> "1024x1024";
+        };
+    }
+
+    /**
+     * Always keep a per-user local copy. Supabase upload is best-effort: a DNS or
+     * storage failure does not discard the OpenAI image.
+     */
+    private GeneratedImage storeGeneratedPng(String userEmail, String userId, String prompt, byte[] pngBytes) throws Exception {
+        String filename = filenameFor(prompt);
+        LocalUserStorageService.StoredFile local;
+        try {
+            local = localUserStorage.saveImage(userId, userEmail, pngBytes, "png");
+        } catch (Exception e) {
+            throw new Exception("Generated image could not be stored", e);
+        }
+
+        String remoteFolder = local.userFolder();
+        String objectPath = "ai-generated/" + remoteFolder + "/" + filename;
+        try {
+            supabaseStorage.upload(objectPath, pngBytes, "image/png");
+            log.info("Uploaded generated image to Supabase and kept local copy in folder {}", remoteFolder);
+        } catch (Exception storageFailure) {
+            log.warn(
+                    "Remote Supabase storage was skipped ({}); local copy kept in folder {}",
+                    storageFailure.getMessage(),
+                    remoteFolder);
+        }
+        return new GeneratedImage(local.publicUrl(), local.relativePath(), filename, pngBytes.length);
+    }
+
+    private static String filenameFor(String prompt) {
+        String safe = prompt == null ? "image" : prompt;
+        return safe.substring(0, Math.min(50, safe.length()))
                 .replaceAll("[^a-zA-Z0-9\\s]", "")
                 .replaceAll("\\s+", "-")
                 .toLowerCase() + "-" + System.currentTimeMillis() + ".png";
+    }
 
-            // Save metadata to database with OpenAI URL
+    /**
+     * Save image URL and metadata to MongoDB.
+     */
+    private String saveToAssets(String userEmail, String userId, GeneratedImage image) throws Exception {
+        try {
+            log.info("Saving AI generated image URL to database for user {}", userEmail);
+
             MediaAsset asset = MediaAsset.builder()
                     .id(UUID.randomUUID().toString())
                     .userEmail(userEmail)
-                    .fileName(filename)
+                    .userId(userId)
+                    .fileName(image.fileName())
                     .mimeType("image/png")
-                    .sizeBytes(0L) // Size unknown (not downloaded)
-                    .supabaseUrl(imageUrl) // Store OpenAI URL here
-                    .objectPath("ai-generated/" + userEmail + "/" + filename)
+                    .sizeBytes(image.sizeBytes())
+                    .supabaseUrl(image.displayUrl())
+                    .objectPath(image.objectPath())
                     .createdAt(Instant.now())
-                    .tags(new ArrayList<>(List.of("ai-generated", "dall-e")))
+                    .tags(new ArrayList<>(List.of("ai-generated", "gpt-image")))
                     .folderPath("AI Generated")
                     .build();
 
@@ -219,4 +304,6 @@ public class AIImageService {
     public List<AIImageJob> listJobs(String userEmail) {
         return jobDao.findByUserEmailOrderByCreatedAtDesc(userEmail);
     }
+
+    private record GeneratedImage(String displayUrl, String objectPath, String fileName, long sizeBytes) {}
 }

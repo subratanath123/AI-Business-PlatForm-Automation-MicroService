@@ -21,6 +21,9 @@ public class AIImageJob {
     
     @Indexed
     private String userEmail;
+
+    /** Clerk user id (JWT sub). The local folder name is a sanitized form of this id. */
+    private String userId;
     
     private String prompt;
     private String size;

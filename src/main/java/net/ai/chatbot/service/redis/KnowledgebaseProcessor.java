@@ -6,8 +6,8 @@ import net.ai.chatbot.entity.ChatBot;
 import net.ai.chatbot.entity.ChatBotTask;
 import net.ai.chatbot.entity.KnowledgeBase;
 import net.ai.chatbot.enums.KnowledgeBaseType;
+import net.ai.chatbot.service.aiprocess.KnowledgebaseIngestionService;
 import net.ai.chatbot.service.mongodb.MongodbVectorService;
-import net.ai.chatbot.service.n8n.N8nWebhookService;
 import net.ai.chatbot.service.training.PlaywrightWebsiteCrawler;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -28,17 +28,14 @@ public class KnowledgebaseProcessor implements StreamListener<String, ObjectReco
 
     private final MongoTemplate mongoTemplate;
     private final MongodbVectorService mongodbVectorService;
-    private final N8nWebhookService n8nWebhookService;
-    private final String knowledgeBaseTrainingWebhookUrl;
+    private final KnowledgebaseIngestionService knowledgebaseIngestionService;
 
     public KnowledgebaseProcessor(MongoTemplate mongoTemplate,
                                   MongodbVectorService mongodbVectorService,
-                                  N8nWebhookService n8nWebhookService,
-                                  String knowledgeBaseTrainingWebhookUrl) {
+                                  KnowledgebaseIngestionService knowledgebaseIngestionService) {
         this.mongoTemplate = mongoTemplate;
         this.mongodbVectorService = mongodbVectorService;
-        this.n8nWebhookService = n8nWebhookService;
-        this.knowledgeBaseTrainingWebhookUrl = knowledgeBaseTrainingWebhookUrl;
+        this.knowledgebaseIngestionService = knowledgebaseIngestionService;
     }
 
     @Override
@@ -69,15 +66,18 @@ public class KnowledgebaseProcessor implements StreamListener<String, ObjectReco
         if (Objects.nonNull(chatBotTask.getFileIds()) && !chatBotTask.getFileIds().isEmpty()) {
             getFileList(chatBotTask.getFileIds())
                     .forEach(secureFileUpload -> {
-                        n8nWebhookService.submitAttachmentToN8nKnowledgebase(
+                        try {
+                        int chunks = knowledgebaseIngestionService.ingestFile(
                                 secureFileUpload.getData(),
                                 secureFileUpload.getFileName(),
                                 secureFileUpload.getEmail(),
                                 knowledgebaseCollectionName,
-                                knowledgebaseVectorIndexName,
-                                secureFileUpload.getContentType(),
-                                knowledgeBaseTrainingWebhookUrl
+                                secureFileUpload.getContentType()
                         );
+                        if (chunks == 0) {
+                            log.warn("No text indexed from file {}", secureFileUpload.getFileName());
+                            return;
+                        }
 
                         KnowledgeBase knowledgeBase = KnowledgeBase.builder()
                                 .knowledgeOf(secureFileUpload.getFileName())
@@ -88,6 +88,9 @@ public class KnowledgebaseProcessor implements StreamListener<String, ObjectReco
                                 .build();
 
                         mongoTemplate.save(knowledgeBase);
+                        } catch (Exception e) {
+                            log.error("Failed to index file {}: {}", secureFileUpload.getFileName(), e.getMessage());
+                        }
                     });
         }
 
@@ -116,13 +119,13 @@ public class KnowledgebaseProcessor implements StreamListener<String, ObjectReco
 
         //Training Textual Knowledegebase
         if (StringUtils.hasLength(knowledgebase)) {
-            n8nWebhookService.submitTextContentToN8nKnowledgebase(
+            try {
+            knowledgebaseIngestionService.ingestText(
                     knowledgebase,
                     chatBot.getEmail(),
                     knowledgebaseCollectionName,
-                    knowledgebaseVectorIndexName,
                     "other knowledge base",
-                    knowledgeBaseTrainingWebhookUrl
+                    "textual-knowledge"
             );
 
             KnowledgeBase knowledgeBase = KnowledgeBase.builder()
@@ -134,6 +137,9 @@ public class KnowledgebaseProcessor implements StreamListener<String, ObjectReco
                     .build();
 
             mongoTemplate.save(knowledgeBase);
+            } catch (Exception e) {
+                log.error("Failed to index textual knowledge for chatbot {}: {}", chatBot.getId(), e.getMessage());
+            }
         }
 
         if (Objects.nonNull(chatBotTask.getAddedWebsites())
@@ -157,13 +163,13 @@ public class KnowledgebaseProcessor implements StreamListener<String, ObjectReco
                     15,
                     1000,
                     scrappedData -> {
-                        n8nWebhookService.submitTextContentToN8nKnowledgebase(
+                        try {
+                        knowledgebaseIngestionService.ingestText(
                                 mapToSemanticText(extractStructuredContent(scrappedData.html(), scrappedData.url())),
                                 chatBot.getEmail(),
                                 knowledgebaseCollectionName,
-                                knowledgebaseVectorIndexName,
                                 "other knowledgebase",
-                                knowledgeBaseTrainingWebhookUrl
+                                scrappedData.url()
                         );
 
                         KnowledgeBase knowledgeBase = KnowledgeBase.builder()
@@ -175,6 +181,9 @@ public class KnowledgebaseProcessor implements StreamListener<String, ObjectReco
                                 .build();
 
                         mongoTemplate.save(knowledgeBase);
+                        } catch (Exception ex) {
+                            log.error("Failed to index page {}: {}", scrappedData.url(), ex.getMessage());
+                        }
                     }
 
             );

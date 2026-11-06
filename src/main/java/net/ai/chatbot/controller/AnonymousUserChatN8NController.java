@@ -6,14 +6,10 @@ import net.ai.chatbot.dto.n8n.N8NChatResponse;
 import net.ai.chatbot.entity.ChatBot;
 import net.ai.chatbot.service.aichatbot.ChatBotService;
 import net.ai.chatbot.service.admin.GuardrailService;
-import net.ai.chatbot.service.n8n.GenericN8NService;
+import net.ai.chatbot.service.aiprocess.NativeAiChatService;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-
-import java.util.Collections;
-import java.util.Map;
 
 @Slf4j
 @RestController
@@ -22,19 +18,13 @@ import java.util.Map;
 public class AnonymousUserChatN8NController {
 
     @Autowired
-    private GenericN8NService<Message, Object> n8nService;
+    private NativeAiChatService nativeAiChatService;
 
     @Autowired
     private ChatBotService chatBotService;
 
     @Autowired
     private GuardrailService guardrailService;
-
-    @Value("${n8n.webhook.knowledgebase.chat.url}")
-    private String webhookUrl;
-
-    @Value("${n8n.webhook.knowledgebase.multimodal.chat.url}")
-    private String multimodalWebhookUrl;
 
     /**
      * Send a single message to N8N workflow
@@ -59,12 +49,7 @@ public class AnonymousUserChatN8NController {
 
         ChatBot chatBot = chatBotService.getChatBot(message.getChatbotId());
 
-        N8NChatResponse<Object> response = n8nService.sendMessage(chatBot, message,
-                message.getFileAttachments() != null && !message.getFileAttachments().isEmpty()
-                        ? multimodalWebhookUrl
-                        : webhookUrl,
-                forwardUserTokenHeader(userToken)
-        );
+        N8NChatResponse<Object> response = nativeAiChatService.reply(chatBot, message, userToken, true);
 
         return ResponseEntity.ok(response);
     }
@@ -98,22 +83,9 @@ public class AnonymousUserChatN8NController {
             chatBot = chatBotService.getChatBot(message.getChatbotId());
         }
 
-        N8NChatResponse<Object> response = n8nService.sendMessage(chatBot, message,
-                message.getFileAttachments() != null && !message.getFileAttachments().isEmpty()
-                        ? multimodalWebhookUrl
-                        : webhookUrl,
-                forwardUserTokenHeader(userToken)
-        );
+        N8NChatResponse<Object> response = nativeAiChatService.reply(chatBot, message, userToken, true);
 
         return ResponseEntity.ok(response);
-    }
-
-    /** Forwards the widget visitor token to N8N as the {@code userToken} header. */
-    private static Map<String, String> forwardUserTokenHeader(String userToken) {
-        if (userToken == null || userToken.isBlank()) {
-            return Collections.emptyMap();
-        }
-        return Map.of("userToken", userToken);
     }
 
     /**

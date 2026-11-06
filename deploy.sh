@@ -47,6 +47,12 @@ start_containers() {
     log_success "Containers started"
 }
 
+cleanup_old_images() {
+    # Each deploy leaves the previous image dangling; drop those so the droplet disk
+    # doesn't fill up. Build cache (the reused dependency layers) is not touched.
+    docker image prune -f > /dev/null || true
+}
+
 show_status() {
     echo ""
     echo "=========================================="
@@ -83,6 +89,7 @@ main() {
     validate_environment
     build_docker_image
     start_containers
+    cleanup_old_images
 
 }
 

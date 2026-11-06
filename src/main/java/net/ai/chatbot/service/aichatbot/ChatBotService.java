@@ -234,6 +234,10 @@ public class ChatBotService {
         }
 
         ChatBot chatBot = getChatBot(messengerIntegration.chatbotId());
+        if (chatBot == null) {
+            log.warn("Messenger integration {} points to missing chatbot {}", messengerId, messengerIntegration.chatbotId());
+            return null;
+        }
         chatBot.setMessengerIntegration(messengerIntegration);
 
         return chatBot;
@@ -252,6 +256,10 @@ public class ChatBotService {
         }
 
         ChatBot chatBot = getChatBot(whatsAppIntegration.chatbotId());
+        if (chatBot == null) {
+            log.warn("WhatsApp integration {} points to missing chatbot {}", phonenumberId, whatsAppIntegration.chatbotId());
+            return null;
+        }
         chatBot.setWhatsAppIntegration(whatsAppIntegration);
 
         return chatBot;
@@ -286,6 +294,10 @@ public class ChatBotService {
         }
 
         ChatBot chatBot = getChatBot(instagramIntegration.chatbotId());
+        if (chatBot == null) {
+            log.warn("Instagram integration {} points to missing chatbot {}", instagramAccountId, instagramIntegration.chatbotId());
+            return null;
+        }
         chatBot.setInstagramIntegration(instagramIntegration);
 
         return chatBot;
@@ -537,11 +549,18 @@ public class ChatBotService {
      * Return first chat of every conversation for the given chatbot
      */
     public List<UserChatHistory> getChatConversationList(String chatbotId) {
+        return getChatConversationList(chatbotId, null);
+    }
+
+    public List<UserChatHistory> getChatConversationList(String chatbotId, String email) {
         log.info("Getting All conversations: {}", chatbotId);
 
-        MatchOperation match = Aggregation.match(
-                Criteria.where("chatbotId").is(chatbotId)
-        );
+        Criteria criteria = Criteria.where("chatbotId").is(chatbotId);
+        if (email != null && !email.isBlank()) {
+            criteria = criteria.and("email").is(email);
+        }
+
+        MatchOperation match = Aggregation.match(criteria);
 
         // sort all records inside each conversation by createdAt
         SortOperation sort = Aggregation.sort(Sort.by(Sort.Direction.ASC, "createdAt"));
@@ -571,20 +590,21 @@ public class ChatBotService {
 
     @Transactional
     public List<UserChatHistory> getChatHistory(String chatbotId, String conversationId) {
+        return getChatHistory(chatbotId, conversationId, true);
+    }
+
+    @Transactional
+    public List<UserChatHistory> getChatHistory(String chatbotId, String conversationId, boolean restrictToCallerEmail) {
         log.info("Getting All chats of the conversation: {}", conversationId);
 
         Criteria criteria = Criteria.where("chatbotId").is(chatbotId)
                 .and("conversationid").is(conversationId);
 
-        // Only filter by email if user is authenticated and not an admin
+        // Owners and admins read the whole thread. Other signed-in users only see rows saved with their email.
         String userEmail = AuthUtils.getEmail();
-        if (userEmail != null && !AuthUtils.isAdmin()) {
+        if (restrictToCallerEmail && userEmail != null && !AuthUtils.isAdmin()) {
             criteria = criteria.and("email").is(userEmail);
-            log.debug("Filtering chat history by email: {}", userEmail);
-        } else if (userEmail == null) {
-            log.debug("Public/unauthenticated request - returning all messages in conversation");
-        } else {
-            log.debug("Admin request - returning all messages in conversation");
+            log.debug("Filtering chat history by caller email");
         }
 
         return mongoTemplate.find(new Query().addCriteria(criteria), UserChatHistory.class);

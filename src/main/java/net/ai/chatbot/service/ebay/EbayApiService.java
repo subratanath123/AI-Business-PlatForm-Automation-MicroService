@@ -11,12 +11,18 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 
 /**
  * Low-level client for eBay's Sell APIs.
@@ -210,12 +216,158 @@ public class EbayApiService {
     public void createOrReplaceInventoryItem(String accessToken, String environment,
                                              String marketplaceId, String sku,
                                              Map<String, Object> body) {
+        EbayListingFields.prepareInventoryBody(body, marketplaceId);
+        log.info("eBay inventory PUT sku={} host={} {}", sku, oauth.apiHost(environment),
+                EbayListingFields.summary(body));
         HttpHeaders headers = marketplaceHeader(marketplaceId);
         headers.set("Content-Language", contentLanguageFor(marketplaceId));
         call(oauth.apiHost(environment), "PUT",
                 "/sell/inventory/v1/inventory_item/" + urlEncode(sku), null,
                 body, accessToken, headers);
     }
+
+    /**
+     * True when the Account API says seller registration is finished.
+     * Null when the privilege call itself failed — callers should not
+     * treat an outage as "not registered".
+     */
+    public Boolean sellerRegistrationCompleted(String accessToken, String environment) {
+        try {
+            String raw = call(oauth.apiHost(environment), "GET",
+                    "/sell/account/v1/privilege", null, null, accessToken, null);
+            JsonNode node = OBJECT_MAPPER.readTree(raw);
+            if (!node.has("sellerRegistrationCompleted") || node.get("sellerRegistrationCompleted").isNull()) {
+                return null;
+            }
+            return node.get("sellerRegistrationCompleted").asBoolean();
+        } catch (Exception e) {
+            log.warn("eBay privilege check failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Inventory locations on the seller account, each with
+     * {@code merchantLocationKey}, {@code name}, {@code merchantLocationStatus},
+     * {@code locationTypes} and a short {@code address}. Null when the
+     * location call failed. An empty list means eBay confirmed there are none.
+     */
+    public List<Map<String, Object>> listInventoryLocations(String accessToken, String environment) {
+        try {
+            String raw = call(oauth.apiHost(environment), "GET",
+                    "/sell/inventory/v1/location", "limit=100", null, accessToken, null);
+            JsonNode locations = raw == null || raw.isBlank()
+                    ? OBJECT_MAPPER.createObjectNode()
+                    : OBJECT_MAPPER.readTree(raw).path("locations");
+            List<Map<String, Object>> out = new ArrayList<>();
+            if (locations.isArray()) {
+                for (JsonNode loc : locations) {
+                    String key = loc.path("merchantLocationKey").asText("");
+                    if (key.isBlank()) continue;
+                    JsonNode address = loc.path("location").path("address");
+                    Map<String, Object> addr = new LinkedHashMap<>();
+                    for (String field : new String[] { "addressLine1", "city", "stateOrProvince", "postalCode", "country" }) {
+                        String value = address.path(field).asText("");
+                        if (!value.isBlank()) addr.put(field, value);
+                    }
+                    List<String> types = new ArrayList<>();
+                    loc.path("locationTypes").forEach(t -> types.add(t.asText()));
+                    Map<String, Object> entry = new LinkedHashMap<>();
+                    entry.put("merchantLocationKey", key);
+                    entry.put("name", loc.path("name").asText(""));
+                    entry.put("merchantLocationStatus", loc.path("merchantLocationStatus").asText("ENABLED"));
+                    entry.put("locationTypes", types);
+                    entry.put("address", addr);
+                    out.add(entry);
+                }
+            }
+            return out;
+        } catch (Exception e) {
+            log.warn("eBay location list failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** Inventory API {@code createInventoryLocation}. eBay answers 204 with no body. */
+    public void createInventoryLocation(String accessToken, String environment,
+                                        String merchantLocationKey, Map<String, Object> body) {
+        call(oauth.apiHost(environment), "POST",
+                "/sell/inventory/v1/location/" + urlEncode(merchantLocationKey), null,
+                body, accessToken, null);
+    }
+
+    /** First leaf category eBay suggests for a title, or null. */
+    public SuggestedCategory suggestCategory(String accessToken, String environment,
+                                             String marketplaceId, String query) {
+        if (query == null || query.isBlank()) return null;
+        String q = query.trim();
+        if (q.length() > 80) q = q.substring(0, 80);
+        String marketplace = marketplaceId == null || marketplaceId.isBlank() ? "EBAY_US" : marketplaceId;
+        try {
+            String treeRaw = call(oauth.apiHost(environment), "GET",
+                    "/commerce/taxonomy/v1/get_default_category_tree_id",
+                    "marketplace_id=" + urlEncode(marketplace), null, accessToken, null);
+            String treeId = OBJECT_MAPPER.readTree(treeRaw).path("categoryTreeId").asText("");
+            if (treeId.isBlank()) return null;
+            String sugRaw = call(oauth.apiHost(environment), "GET",
+                    "/commerce/taxonomy/v1/category_tree/" + urlEncode(treeId) + "/get_category_suggestions",
+                    "q=" + urlEncode(q), null, accessToken, null);
+            JsonNode suggestions = OBJECT_MAPPER.readTree(sugRaw).path("categorySuggestions");
+            if (!suggestions.isArray() || suggestions.isEmpty()) return null;
+            JsonNode category = suggestions.get(0).path("category");
+            String id = category.path("categoryId").asText("");
+            String name = category.path("categoryName").asText("");
+            if (!EbayListingFields.numericCategoryId(id)) return null;
+            return new SuggestedCategory(id, name);
+        } catch (Exception e) {
+            log.warn("eBay category suggestion failed: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Upload image bytes to eBay Picture Services with the Media API
+     * ({@code createImageFromFile}) and return the https EPS URL. Used when
+     * the only copy of a picture is on this machine. The Trading API call
+     * {@code UploadSiteHostedPictures} answers 404/410 for this app's OAuth tokens.
+     */
+    public String createImageFromFile(String accessToken, String environment,
+                                      byte[] bytes, String filename, String contentType) {
+        if (bytes == null || bytes.length == 0) {
+            throw new RuntimeException("Cannot upload an empty image to eBay");
+        }
+        if (bytes.length > 12 * 1024 * 1024) {
+            throw new RuntimeException("Image is larger than 12 MB, which eBay Picture Services will not accept");
+        }
+        String boundary = "JadeEbay" + UUID.randomUUID().toString().replace("-", "");
+        byte[] payload = EbayListingFields.mediaUploadBody(boundary, bytes, filename, contentType);
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(oauth.mediaHost(environment) + "/commerce/media/v1_beta/image/create_image_from_file"))
+                .timeout(Duration.ofSeconds(60))
+                .header("Authorization", "Bearer " + accessToken)
+                .header("Content-Type", "multipart/form-data; boundary=" + boundary)
+                .POST(HttpRequest.BodyPublishers.ofByteArray(payload))
+                .build();
+        String body;
+        int status;
+        try {
+            HttpResponse<String> response = HttpClient.newHttpClient()
+                    .send(request, HttpResponse.BodyHandlers.ofString());
+            status = response.statusCode();
+            body = response.body() == null ? "" : response.body();
+        } catch (Exception e) {
+            throw new RuntimeException("eBay picture upload failed: " + e.getMessage());
+        }
+        String url = EbayListingFields.mediaImageUrl(body);
+        if (status >= 200 && status < 300 && url != null) {
+            log.info("Hosted eBay picture at {}", EbayListingFields.hostOf(url));
+            return url;
+        }
+        throw new RuntimeException("eBay picture upload failed: " + status + " "
+                + EbayListingFields.mediaError(body));
+    }
+
+    public record SuggestedCategory(String categoryId, String categoryName) {}
 
     /**
      * List every offer for a SKU (one per marketplace at most). Useful

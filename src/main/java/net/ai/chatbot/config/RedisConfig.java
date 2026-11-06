@@ -2,8 +2,8 @@ package net.ai.chatbot.config;
 
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.SocketOptions;
+import net.ai.chatbot.service.aiprocess.KnowledgebaseIngestionService;
 import net.ai.chatbot.service.mongodb.MongodbVectorService;
-import net.ai.chatbot.service.n8n.N8nWebhookService;
 import net.ai.chatbot.service.redis.KnowledgebaseProcessor;
 import net.ai.chatbot.service.redis.RedisConsumerGroupService;
 import org.springframework.beans.factory.annotation.Value;
@@ -43,9 +43,6 @@ public class RedisConfig {
 
     @Value("${spring.data.redis.password}")
     private String redisPassword;
-
-    @Value("${n8n.webhook.knowledgebase.train.url}")
-    private String webhookKnowledgebaseTrainUrl;
 
     private final RedisConsumerGroupService redisConsumerGroupService;
 
@@ -125,7 +122,7 @@ public class RedisConfig {
             StreamMessageListenerContainer<String, ObjectRecord<String, String>> container,
             MongoTemplate mongoTemplate,
             MongodbVectorService mongodbVectorService,
-            N8nWebhookService n8nWebhookService
+            KnowledgebaseIngestionService knowledgebaseIngestionService
     ) throws UnknownHostException {
 
         redisConsumerGroupService
@@ -138,14 +135,14 @@ public class RedisConfig {
         return container.receive(
                 Consumer.from(REDIS_STREAM_SERVER_GROUP, InetAddress.getLocalHost().getHostName()),
                 streamOffset,
-                purchaseStreamListener(mongoTemplate, mongodbVectorService, n8nWebhookService)
+                purchaseStreamListener(mongoTemplate, mongodbVectorService, knowledgebaseIngestionService)
         );
     }
 
     @Bean
     public StreamListener<String, ObjectRecord<String, String>> purchaseStreamListener(MongoTemplate mongoTemplate,
                                                                                        MongodbVectorService mongodbVectorService,
-                                                                                       N8nWebhookService n8nWebhookService) {
-        return new KnowledgebaseProcessor(mongoTemplate, mongodbVectorService, n8nWebhookService, webhookKnowledgebaseTrainUrl);
+                                                                                       KnowledgebaseIngestionService knowledgebaseIngestionService) {
+        return new KnowledgebaseProcessor(mongoTemplate, mongodbVectorService, knowledgebaseIngestionService);
     }
 }

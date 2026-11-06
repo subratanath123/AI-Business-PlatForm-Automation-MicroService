@@ -9,6 +9,7 @@ import net.ai.chatbot.dto.mediaasset.ListAssetsResponse;
 import net.ai.chatbot.dto.mediaasset.UploadResponse;
 import net.ai.chatbot.entity.AssetFolder;
 import net.ai.chatbot.entity.MediaAsset;
+import net.ai.chatbot.service.storage.LocalUserStorageService;
 import net.ai.chatbot.service.storage.SupabaseStorageService;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -40,6 +41,7 @@ public class MediaAssetService {
     private final MediaAssetDao mediaAssetDao;
     private final AssetFolderDao assetFolderDao;
     private final SupabaseStorageService supabaseStorage;
+    private final LocalUserStorageService localUserStorage;
 
     private static final long MAX_FILE_SIZE = 50L * 1024 * 1024; // 50 MB
 
@@ -48,7 +50,7 @@ public class MediaAssetService {
      * Returns list of successfully uploaded assets and any failures.
      */
     @Transactional
-    public UploadResponse uploadAll(String userEmail, List<MultipartFile> files, String folderPath) {
+    public UploadResponse uploadAll(String userEmail, String userId, List<MultipartFile> files, String folderPath) {
         List<UploadResponse.AssetDto> uploaded = new ArrayList<>();
         List<UploadResponse.FailedUpload> failed = new ArrayList<>();
 
@@ -77,28 +79,35 @@ public class MediaAssetService {
                 }
 
                 String safeName = sanitizeFilename(originalFilename);
+                byte[] bytes = file.getBytes();
+                String extension = extensionOf(safeName);
 
-                // Generate object path: social-posts/{userEmail}/{folderPath}/{timestamp}_{filename}
-                String objectPath = "social-posts/" + userEmail + "/" 
+                LocalUserStorageService.StoredFile local = localUserStorage.saveUpload(
+                        userId, userEmail, bytes, extension);
+
+                String remotePath = "social-posts/" + local.userFolder() + "/"
                         + (folderPath.isEmpty() ? "" : folderPath + "/")
                         + System.currentTimeMillis() + "_" + safeName;
+                try {
+                    supabaseStorage.upload(remotePath, bytes, file.getContentType());
+                    log.info("Uploaded file to Supabase and kept local copy in folder {}", local.userFolder());
+                } catch (Exception storageFailure) {
+                    log.warn(
+                            "Remote Supabase storage was skipped ({}); local copy kept in folder {}",
+                            storageFailure.getMessage(),
+                            local.userFolder());
+                }
 
-                // Upload to Supabase
-                String publicUrl = supabaseStorage.upload(
-                        objectPath, 
-                        file.getBytes(), 
-                        file.getContentType()
-                );
-
-                // Save to database
+                // Save to database. The URL the UI loads is the local file.
                 MediaAsset asset = MediaAsset.builder()
                         .id(UUID.randomUUID().toString())
                         .userEmail(userEmail)
+                        .userId(userId)
                         .fileName(originalFilename)
                         .mimeType(file.getContentType())
                         .sizeBytes(file.getSize())
-                        .supabaseUrl(publicUrl)
-                        .objectPath(objectPath)
+                        .supabaseUrl(local.publicUrl())
+                        .objectPath(local.relativePath())
                         .createdAt(Instant.now())
                         .tags(new ArrayList<>())
                         .folderPath(folderPath)
@@ -131,7 +140,7 @@ public class MediaAssetService {
      */
     @Transactional
     public UploadResponse uploadAll(String userEmail, List<MultipartFile> files) {
-        return uploadAll(userEmail, files, "");
+        return uploadAll(userEmail, null, files, "");
     }
 
     /**
@@ -205,8 +214,7 @@ public class MediaAssetService {
                         "Asset not found or you don't have permission to delete it"
                 ));
 
-        // Delete from Supabase
-        supabaseStorage.delete(asset.getObjectPath());
+        deleteStoredObject(asset.getObjectPath());
 
         // Delete from database
         mediaAssetDao.deleteByIdAndUserEmail(id, userEmail);
@@ -359,9 +367,7 @@ public class MediaAssetService {
         // Delete all assets in this folder and subfolders
         List<MediaAsset> assetsInFolder = mediaAssetDao.findByUserEmailAndFolderPathStartingWith(userEmail, folderPath);
         for (MediaAsset asset : assetsInFolder) {
-            // Delete from Supabase
-            supabaseStorage.delete(asset.getObjectPath());
-            // Delete from database
+            deleteStoredObject(asset.getObjectPath());
             mediaAssetDao.delete(asset);
         }
 
@@ -416,7 +422,7 @@ public class MediaAssetService {
      * if signing is unavailable (e.g. storage misconfigured, asset lacking objectPath).
      */
     private String freshUrl(MediaAsset asset) {
-        if (asset.getObjectPath() == null || asset.getObjectPath().isBlank()) {
+        if (!isRemoteObjectPath(asset.getObjectPath())) {
             return asset.getSupabaseUrl();
         }
         String signed = supabaseStorage.createSignedUrl(asset.getObjectPath());
@@ -431,9 +437,33 @@ public class MediaAssetService {
         if (assets == null || assets.isEmpty()) return new HashMap<>();
         List<String> paths = assets.stream()
                 .map(MediaAsset::getObjectPath)
-                .filter((p) -> p != null && !p.isBlank())
+                .filter(MediaAssetService::isRemoteObjectPath)
                 .collect(Collectors.toList());
         if (paths.isEmpty()) return new HashMap<>();
         return supabaseStorage.createSignedUrls(paths);
+    }
+
+    /** Local copies use {@code users/...} and are not sent to Supabase for signing. */
+    private static boolean isRemoteObjectPath(String path) {
+        return path != null && !path.isBlank() && !path.startsWith("users/");
+    }
+
+    private void deleteStoredObject(String objectPath) {
+        if (objectPath != null && objectPath.startsWith("users/")) {
+            localUserStorage.deleteRelative(objectPath);
+            return;
+        }
+        supabaseStorage.delete(objectPath);
+    }
+
+    private static String extensionOf(String fileName) {
+        if (fileName == null) {
+            return "bin";
+        }
+        int dot = fileName.lastIndexOf('.');
+        if (dot < 0 || dot == fileName.length() - 1) {
+            return "bin";
+        }
+        return fileName.substring(dot + 1);
     }
 }

@@ -14,6 +14,7 @@ import net.ai.chatbot.entity.EbayProductEnhancementJob;
 import net.ai.chatbot.entity.EbayProductEnhancementJob.EbayProductItem;
 import net.ai.chatbot.entity.ProductEnhancementJob;
 import net.ai.chatbot.service.shopify.ProductAIEnhancementService;
+import net.ai.chatbot.service.storage.LocalUserStorageService;
 import net.ai.chatbot.utils.EncryptionUtils;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -44,6 +45,14 @@ import java.util.stream.Collectors;
 public class EbayIntegrationService {
 
     private static final String DEFAULT_MARKETPLACE_ID = "EBAY_US";
+    static final String NO_IMAGE_MESSAGE =
+            "This draft has no product image. Add one in the Images section (Upload or From library), save the draft, then publish again.";
+    static final String NO_LOCATION_MESSAGE =
+            "This eBay account has no inventory location, and a listing cannot go live without one. "
+            + "Add one in Jade with Add inventory location (on this page or under Locations on the eBay Enhancer page), then publish again.";
+    static final String SELLER_REGISTRATION_MESSAGE =
+            "eBay reports that seller registration is not finished for this account (checked just now). "
+            + "Finish it at https://www.ebay.com/sl/sell (sign in as this seller), then publish again.";
     /** eBay subscription topics we register when notifications are enabled. */
     private static final List<String> NOTIFICATION_TOPICS = List.of(
             "INVENTORY_ITEM.CREATED",
@@ -68,6 +77,8 @@ public class EbayIntegrationService {
     private final EbayOAuthService oauth;
     private final ProductAIEnhancementService aiEnhancementService;
     private final EncryptionUtils encryptionUtils;
+    private final EbayLocalImageResolver localImages;
+    private final LocalUserStorageService localStorage;
 
     // ──────────────────────────────────────────────────────────────────────────
     // OAuth handshake
@@ -305,10 +316,86 @@ public class EbayIntegrationService {
         return parsed.stream().map(this::shopifyDtoToEbayDto).collect(Collectors.toList());
     }
 
-    public List<EbayProductDto> parseProductsFromImages(List<String> imageUrls) {
+    /**
+     * Describe products from photos, and keep the photos: each data URL is
+     * saved to the user's local storage and the stored URLs are returned on
+     * the products as {@code images}, so the draft created from them has a
+     * picture to host on eBay at publish time.
+     */
+    public List<EbayProductDto> parseProductsFromImages(String userId, String email, List<String> imageUrls) {
         log.info("eBay: parsing product from {} image(s)", imageUrls == null ? 0 : imageUrls.size());
         List<ShopifyProductDto> parsed = aiEnhancementService.parseProductsFromImages(imageUrls);
-        return parsed.stream().map(this::shopifyDtoToEbayDto).collect(Collectors.toList());
+        List<EbayProductDto> products = parsed.stream().map(this::shopifyDtoToEbayDto).collect(Collectors.toList());
+        List<String> stored = storeProductPhotos(userId, email, imageUrls);
+        List<List<String>> assigned = EbayListingFields.assignImages(products.size(), stored);
+        for (int i = 0; i < products.size(); i++) {
+            if (!hasAnyImage(products.get(i).getImages())) products.get(i).setImages(assigned.get(i));
+        }
+        return products;
+    }
+
+    private List<String> storeProductPhotos(String userId, String email, List<String> imageUrls) {
+        List<String> out = new ArrayList<>();
+        if (imageUrls == null) return out;
+        for (String src : imageUrls) {
+            if (src == null || src.isBlank()) continue;
+            EbayListingFields.DecodedImage image = EbayListingFields.decodeDataUrl(src);
+            if (image == null) {
+                if (src.trim().regionMatches(true, 0, "http", 0, 4)) out.add(src.trim());
+                continue;
+            }
+            try {
+                out.add(localStorage.saveUpload(userId, email, image.bytes(), image.extension()).publicUrl());
+            } catch (Exception e) {
+                log.warn("Could not keep a product photo for the eBay draft: {}", e.getMessage());
+            }
+        }
+        return out;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
+    // Inventory locations
+    // ──────────────────────────────────────────────────────────────────────────
+
+    public Map<String, Object> listLocations(String userId) {
+        EbayIntegration integration = requireIntegration(userId);
+        List<Map<String, Object>> locations = apiService.listInventoryLocations(
+                accessToken(integration), integration.getEnvironment());
+        if (locations == null) {
+            throw new RuntimeException("Could not load inventory locations from eBay. Try again in a moment.");
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("environment", integration.getEnvironment());
+        result.put("locations", locations);
+        result.put("defaultMerchantLocationKey",
+                EbayListingFields.chooseLocationKey(locations, integration.getDefaultMerchantLocationKey()));
+        return result;
+    }
+
+    /** Create an ENABLED warehouse location on the connected account and make it the store default. */
+    public Map<String, Object> createLocation(String userId, Map<String, Object> request) {
+        EbayListingFields.LocationInput input = new EbayListingFields.LocationInput(
+                str(request, "name"), str(request, "addressLine1"), str(request, "addressLine2"),
+                str(request, "city"), str(request, "stateOrProvince"), str(request, "postalCode"),
+                str(request, "country"));
+        Map<String, Object> body = EbayListingFields.locationBody(input);
+        EbayIntegration integration = requireIntegration(userId);
+        String key = EbayListingFields.locationKey(input.name(), UUID.randomUUID().toString());
+        try {
+            apiService.createInventoryLocation(accessToken(integration), integration.getEnvironment(), key, body);
+        } catch (RuntimeException e) {
+            throw new RuntimeException("eBay did not create the location: " + EbayListingFields.mediaError(e.getMessage()));
+        }
+        integration.setDefaultMerchantLocationKey(key);
+        integration.setUpdatedAt(Instant.now());
+        ebayDao.save(integration);
+        log.info("Created eBay inventory location {} ({} env) for user {}", key, integration.getEnvironment(), userId);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("merchantLocationKey", key);
+        result.put("name", body.get("name"));
+        result.put("merchantLocationStatus", "ENABLED");
+        result.put("environment", integration.getEnvironment());
+        return result;
     }
 
     public EbayProductEnhancementJob createUploadJob(String userId, List<EbayProductDto> products) {
@@ -400,7 +487,7 @@ public class EbayIntegrationService {
         int successCount = 0;
         for (EbayProductItem item : toPublish) {
             try {
-                publishItem(integration, accessToken, item);
+                publishItem(integration, accessToken, item, draftImages(job, item));
                 item.setStatus("PUBLISHED");
                 successCount++;
             } catch (Exception e) {
@@ -416,8 +503,13 @@ public class EbayIntegrationService {
         log.info("Pushed {}/{} products to eBay for job {}", successCount, toPublish.size(), jobId);
     }
 
-    /** Build and upload the inventory_item + offer for a single item, then publish. */
-    private void publishItem(EbayIntegration integration, String accessToken, EbayProductItem item) {
+    /**
+     * Build and upload the inventory_item + offer for a single item, then publish.
+     * {@code sourceImages} are the draft's stored picture URLs; they are replaced
+     * on the item by the eBay-hosted URLs only once the listing is live.
+     */
+    private void publishItem(EbayIntegration integration, String accessToken, EbayProductItem item,
+                             List<String> sourceImages) {
         String marketplaceId = item.getMarketplaceId() == null || item.getMarketplaceId().isBlank()
                 ? integration.getActiveMarketplaceId() : item.getMarketplaceId();
         if (marketplaceId == null || marketplaceId.isBlank()) marketplaceId = DEFAULT_MARKETPLACE_ID;
@@ -425,6 +517,74 @@ public class EbayIntegrationService {
         if (item.getSku() == null || item.getSku().isBlank()) {
             item.setSku(generateSku(item));
         }
+
+        List<String> problems = new ArrayList<>();
+        String price = EbayListingFields.positivePrice(item.getPrice());
+        if (price == null) {
+            problems.add("Set a price greater than 0 before publishing.");
+        } else {
+            item.setPrice(price);
+        }
+
+        List<String> images = List.of();
+        if (!hasAnyImage(sourceImages)) {
+            problems.add(NO_IMAGE_MESSAGE);
+        } else {
+            try {
+                images = resolveImagesForEbay(accessToken, integration.getEnvironment(), sourceImages);
+            } catch (RuntimeException e) {
+                problems.add(e.getMessage());
+            }
+        }
+
+        String categoryId = firstNonBlank(item.getCategoryId(), integration.getDefaultCategoryId());
+        String suggestedCategoryName = null;
+        if (!EbayListingFields.numericCategoryId(categoryId)) {
+            String titleForCategory = firstNonBlank(item.getEnhancedTitle(), item.getTitle());
+            EbayApiService.SuggestedCategory suggested = apiService.suggestCategory(
+                    accessToken, integration.getEnvironment(), marketplaceId, titleForCategory);
+            if (suggested != null) {
+                categoryId = suggested.categoryId();
+                suggestedCategoryName = suggested.categoryName();
+                item.setCategoryId(categoryId);
+            }
+        } else {
+            categoryId = categoryId.trim();
+            item.setCategoryId(categoryId);
+        }
+        if (!EbayListingFields.numericCategoryId(categoryId)) {
+            problems.add("Set an eBay category id (a number such as 11848 for Women's Fragrances).");
+        }
+
+        String locationKey = integration.getDefaultMerchantLocationKey();
+        List<Map<String, Object>> locations = apiService.listInventoryLocations(
+                accessToken, integration.getEnvironment());
+        if (locations == null) {
+            log.warn("Could not list eBay inventory locations; publish will use the saved default {}", locationKey);
+        } else {
+            locationKey = EbayListingFields.chooseLocationKey(locations, locationKey);
+            if (locationKey == null) {
+                problems.add(locations.isEmpty() ? NO_LOCATION_MESSAGE
+                        : "None of this eBay account's inventory locations is enabled. Add a location in Jade "
+                          + "(Add inventory location), then publish again.");
+            }
+        }
+
+        Boolean registered = apiService.sellerRegistrationCompleted(accessToken, integration.getEnvironment());
+        if (Boolean.FALSE.equals(registered)) {
+            problems.add(SELLER_REGISTRATION_MESSAGE);
+        }
+
+        if (!problems.isEmpty()) {
+            if (suggestedCategoryName != null) {
+                problems.add("Category " + categoryId + " (" + suggestedCategoryName
+                        + ") was saved from the product title. Change it on the draft if that is wrong.");
+            }
+            throw new RuntimeException(String.join(" ", problems));
+        }
+
+        int quantity = item.getInventoryQuantity() == null || item.getInventoryQuantity() < 1
+                ? 1 : item.getInventoryQuantity();
 
         // 1. inventory_item
         Map<String, Object> product = new LinkedHashMap<>();
@@ -441,19 +601,18 @@ public class EbayIntegrationService {
         Map<String, List<String>> aspects = item.getEnhancedAspects() != null
                 && !item.getEnhancedAspects().isEmpty() ? item.getEnhancedAspects() : item.getAspects();
         if (aspects != null && !aspects.isEmpty()) product.put("aspects", aspects);
-        if (item.getImages() != null && !item.getImages().isEmpty()) {
-            product.put("imageUrls", item.getImages());
-        }
+        product.put("imageUrls", images);
 
         Map<String, Object> itemBody = new LinkedHashMap<>();
         itemBody.put("product",   product);
         itemBody.put("condition", item.getCondition() == null || item.getCondition().isBlank()
                 ? "NEW" : item.getCondition());
+        itemBody.put("locale", EbayListingFields.localeFor(marketplaceId));
         if (item.getConditionDescription() != null && !item.getConditionDescription().isBlank()) {
             itemBody.put("conditionDescription", item.getConditionDescription());
         }
         Map<String, Object> ship = new LinkedHashMap<>();
-        ship.put("quantity", item.getInventoryQuantity() == null ? 1 : item.getInventoryQuantity());
+        ship.put("quantity", quantity);
         itemBody.put("availability", Map.of("shipToLocationAvailability", ship));
 
         apiService.createOrReplaceInventoryItem(accessToken, integration.getEnvironment(),
@@ -464,23 +623,17 @@ public class EbayIntegrationService {
         offerBody.put("sku",           item.getSku());
         offerBody.put("marketplaceId", marketplaceId);
         offerBody.put("format",        "FIXED_PRICE");
-        String categoryId = item.getCategoryId() == null || item.getCategoryId().isBlank()
-                ? integration.getDefaultCategoryId() : item.getCategoryId();
-        if (categoryId == null || categoryId.isBlank()) {
-            throw new RuntimeException("No eBay categoryId configured. Set a default category on the store or on the product.");
-        }
         offerBody.put("categoryId", categoryId);
 
-        Map<String, Object> price = new LinkedHashMap<>();
-        price.put("value",    item.getPrice() == null ? "0" : item.getPrice());
-        price.put("currency", item.getCurrency() == null || item.getCurrency().isBlank()
+        Map<String, Object> priceMap = new LinkedHashMap<>();
+        priceMap.put("value",    price);
+        priceMap.put("currency", item.getCurrency() == null || item.getCurrency().isBlank()
                 ? defaultCurrencyFor(marketplaceId) : item.getCurrency());
-        offerBody.put("pricingSummary", Map.of("price", price));
-        offerBody.put("availableQuantity", item.getInventoryQuantity() == null ? 1 : item.getInventoryQuantity());
+        offerBody.put("pricingSummary", Map.of("price", priceMap));
+        offerBody.put("availableQuantity", quantity);
 
-        if (integration.getDefaultMerchantLocationKey() != null
-                && !integration.getDefaultMerchantLocationKey().isBlank()) {
-            offerBody.put("merchantLocationKey", integration.getDefaultMerchantLocationKey());
+        if (locationKey != null && !locationKey.isBlank()) {
+            offerBody.put("merchantLocationKey", locationKey);
         }
         Map<String, Object> policies = new LinkedHashMap<>();
         if (integration.getDefaultFulfillmentPolicyId() != null) policies.put("fulfillmentPolicyId", integration.getDefaultFulfillmentPolicyId());
@@ -498,6 +651,37 @@ public class EbayIntegrationService {
             String listingId = apiService.publishOffer(accessToken, integration.getEnvironment(), offerId);
             if (listingId != null) item.setItemId(listingId);
         }
+        item.setImages(images);
+    }
+
+    private static boolean hasAnyImage(List<String> images) {
+        return images != null && images.stream().anyMatch(s -> s != null && !s.isBlank());
+    }
+
+    /**
+     * The draft's picture URLs. The enhanced copy is preferred; when it has
+     * none, the raw copy with the same localId is used, so an image is never
+     * lost between the two lists.
+     */
+    private static List<String> draftImages(EbayProductEnhancementJob job, EbayProductItem item) {
+        if (hasAnyImage(item.getImages())) return item.getImages();
+        for (EbayProductItem twin : twins(job, item)) {
+            if (hasAnyImage(twin.getImages())) return twin.getImages();
+        }
+        return item.getImages();
+    }
+
+    /** The other copies (raw / enhanced) of the same draft. */
+    private static List<EbayProductItem> twins(EbayProductEnhancementJob job, EbayProductItem item) {
+        List<EbayProductItem> out = new ArrayList<>();
+        if (item.getLocalId() == null) return out;
+        for (List<EbayProductItem> list : java.util.Arrays.asList(job.getEnhancedProducts(), job.getRawProducts())) {
+            if (list == null) continue;
+            for (EbayProductItem p : list) {
+                if (p != item && item.getLocalId().equals(p.getLocalId())) out.add(p);
+            }
+        }
+        return out;
     }
 
     // ──────────────────────────────────────────────────────────────────────────
@@ -725,6 +909,9 @@ public class EbayIntegrationService {
         String mp = integration.getActiveMarketplaceId() == null
                 ? DEFAULT_MARKETPLACE_ID : integration.getActiveMarketplaceId();
 
+        if (req.getImages() != null) {
+            req.setImages(resolveImagesForEbay(accessToken, integration.getEnvironment(), req.getImages()));
+        }
         apiService.patchListing(accessToken, integration.getEnvironment(), mp, sku, req,
                 integration.getDefaultCategoryId(),
                 integration.getDefaultMerchantLocationKey(),
@@ -747,11 +934,16 @@ public class EbayIntegrationService {
         List<String> images = new ArrayList<>();
         Object existing = listing.get("images");
         if (existing instanceof List<?> l) for (Object o : l) if (o != null) images.add(o.toString());
-        if (images.contains(src)) return images;
+        List<String> hosted = resolveImagesForEbay(accessToken, integration.getEnvironment(), List.of(src));
+        if (hosted.isEmpty()) {
+            throw new RuntimeException("eBay cannot download that image. Use a public https URL, or upload a file stored on this computer.");
+        }
+        String publicSrc = hosted.get(0);
+        if (images.contains(publicSrc)) return images;
         if (images.size() >= 24) {
             throw new RuntimeException("eBay supports at most 24 images per listing");
         }
-        images.add(src);
+        images.add(publicSrc);
 
         EbayDirectProductUpdateRequest req = new EbayDirectProductUpdateRequest();
         req.setImages(images);
@@ -878,7 +1070,10 @@ public class EbayIntegrationService {
         if (req.getCurrency() != null)       item.setCurrency(req.getCurrency());
         if (req.getSku() != null)            item.setSku(req.getSku());
         if (req.getInventoryQuantity() != null) item.setInventoryQuantity(req.getInventoryQuantity());
-        if (req.getImages() != null)         item.setImages(req.getImages());
+        if (req.getImages() != null) {
+            item.setImages(req.getImages());
+            for (EbayProductItem twin : twins(job, item)) twin.setImages(new ArrayList<>(req.getImages()));
+        }
 
         String current = item.getLifecycleStatus();
         if ("SYNCED".equals(current) || "PUBLISHED".equals(current)) {
@@ -907,7 +1102,7 @@ public class EbayIntegrationService {
                 item.setSku(generateSku(item));
             }
 
-            publishItem(integration, accessToken, item);
+            publishItem(integration, accessToken, item, draftImages(job, item));
             item.setLifecycleStatus("PUBLISHED");
             job.setUpdatedAt(Instant.now());
             jobDao.save(job);
@@ -921,6 +1116,12 @@ public class EbayIntegrationService {
             result.put("localId",         item.getLocalId());
             return result;
         } catch (Exception e) {
+            try {
+                job.setUpdatedAt(Instant.now());
+                jobDao.save(job);
+            } catch (Exception saveEx) {
+                log.warn("Could not save eBay draft after publish failure: {}", saveEx.getMessage());
+            }
             log.error("Failed to publish eBay draft {} (job {}): {}", localId, jobId, e.getMessage());
             throw new RuntimeException("Failed to publish draft: " + e.getMessage());
         }
@@ -948,6 +1149,46 @@ public class EbayIntegrationService {
     // ──────────────────────────────────────────────────────────────────────────
     // Helpers
     // ──────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Keep https URLs eBay can fetch. Pictures stored by this app (or held
+     * as data URLs) are uploaded to eBay Picture Services and replaced by
+     * the returned EPS URL, so subratapc.net and localhost never reach eBay.
+     * An empty input returns an empty list; a non-empty input that cannot
+     * be hosted throws.
+     */
+    private List<String> resolveImagesForEbay(String accessToken, String environment, List<String> raw) {
+        List<String> out = new ArrayList<>();
+        List<String> problems = new ArrayList<>();
+        if (raw == null || raw.isEmpty()) return out;
+        for (String src : raw) {
+            if (src == null || src.isBlank()) continue;
+            if (out.size() >= EbayListingFields.MAX_IMAGES) break;
+            String url = src.trim();
+            EbayListingFields.DecodedImage image = EbayListingFields.decodeDataUrl(url);
+            if (image == null && localImages.isLocal(url)) {
+                image = localImages.load(url).orElse(null);
+            }
+            if (image == null) {
+                if (EbayListingFields.isPublicHttpsImage(url)) out.add(url);
+                else problems.add(EbayListingFields.imageRejection(url));
+                continue;
+            }
+            try {
+                out.add(apiService.createImageFromFile(accessToken, environment,
+                        image.bytes(), "image." + image.extension(), image.contentType()));
+            } catch (RuntimeException e) {
+                log.warn("eBay picture hosting failed for an image on {}: {}",
+                        EbayListingFields.hostOf(url), e.getMessage());
+                problems.add("The image on " + EbayListingFields.hostOf(url)
+                        + " was found but eBay Picture Services did not accept it (" + e.getMessage() + ").");
+            }
+        }
+        if (out.isEmpty() && !problems.isEmpty()) {
+            throw new RuntimeException(String.join(" ", problems));
+        }
+        return out;
+    }
 
     private String accessToken(EbayIntegration integration) {
         return oauth.getAccessToken(

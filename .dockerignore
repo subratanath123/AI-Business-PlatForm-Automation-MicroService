@@ -1,50 +1,6 @@
-# Gradle
-.gradle/
-gradle/
-gradlew
-gradlew.bat
-build/
-!build/libs/
-!build/libs/*.jar
-
-# IDE
-.idea/
-.vscode/
-*.iml
-*.ipr
-*.iws
-
-# Git
-.git/
-.gitignore
-
-# Documentation
-*.md
-!README.md
-
-# Docker
-Dockerfile
-.dockerignore
-docker-compose*.yml
-compose.yaml
-
-# Test files
-src/test/
-*.test
-
-# Logs
-*.log
-logs/
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Environment files
-.env
-.env.local
-.env.*.local
-
-# Deployment scripts
-deploy.sh
-.github/
+# The image only needs the prebuilt boot jar (see Dockerfile), so ignore everything
+# else. This keeps the build context tiny and keeps sources, storage/, uploads/,
+# chat-widget/node_modules and local secrets (application-local.properties, .env*)
+# out of the Docker daemon.
+*
+!build/libs/JadeAiBot.jar

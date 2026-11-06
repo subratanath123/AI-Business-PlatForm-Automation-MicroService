@@ -65,12 +65,16 @@ amazon:
     client-secret: ${AMAZON_LWA_CLIENT_SECRET:}
 
 # eBay Sell API Integration
-# Requires an eBay developer account + a registered app:
-#   EBAY_APP_ID   — the Client ID from your eBay developer dashboard
-#   EBAY_CERT_ID  — the Client Secret ("Cert ID") from your eBay developer dashboard
-#   EBAY_RU_NAME  — the RuName registered in the eBay dashboard whose
+# Requires an eBay developer account + a registered app. Production and
+# sandbox are separate eBay keys. The connect dialog sends PRODUCTION or
+# SANDBOX and that choice selects both the credential set and the host
+# (auth.ebay.com / api.ebay.com vs auth.sandbox.ebay.com / api.sandbox.ebay.com).
+#   EBAY_APP_ID / EBAY_PRODUCTION_APP_ID   — production Client ID
+#   EBAY_CERT_ID / EBAY_PRODUCTION_CERT_ID — production Cert ID
+#   EBAY_RU_NAME / EBAY_PRODUCTION_RU_NAME — production RuName whose
 #                   "Your auth accepted URL" points to {FRONTEND_URL}/auth/ebay/callback
-#   EBAY_SANDBOX  — "true" to default new connects to the eBay sandbox, "false" for production
+#   EBAY_SANDBOX_APP_ID / CERT_ID / RU_NAME — sandbox keys
+#   EBAY_SANDBOX  — "true" only when a connect request omits the environment
 # Platform notifications need a publicly reachable HTTPS endpoint. We expose
 # {app.base-url}/api/public/ebay/notify/{userId}; callers supply a
 # verification token they also register with eBay.
@@ -80,6 +84,14 @@ ebay:
     cert-id:  ${EBAY_CERT_ID:}
     ru-name:  ${EBAY_RU_NAME:}
     sandbox:  ${EBAY_SANDBOX:false}
+    production:
+      app-id:  ${EBAY_PRODUCTION_APP_ID:${EBAY_APP_ID:}}
+      cert-id: ${EBAY_PRODUCTION_CERT_ID:${EBAY_CERT_ID:}}
+      ru-name: ${EBAY_PRODUCTION_RU_NAME:${EBAY_RU_NAME:}}
+    sandbox-credentials:
+      app-id:  ${EBAY_SANDBOX_APP_ID:}
+      cert-id: ${EBAY_SANDBOX_CERT_ID:}
+      ru-name: ${EBAY_SANDBOX_RU_NAME:}
 
 # Stripe Payment Integration
 stripe:
@@ -93,8 +105,8 @@ meta:
   app-id: ${FACEBOOK_APP_ID:}
   app-secret: ${FACEBOOK_APP_SECRET:}
   oauth-callback-secret: ${META_OAUTH_CALLBACK_SECRET:}
-  # Your n8n webhook URL that receives Instagram/Messenger messages
-  webhook-url: ${META_WEBHOOK_URL:https://n8n.jadeordersmedia.com/webhook/meta-messages}
+  # Callback URL registered in the Meta app. Messages are answered in this service.
+  webhook-url: ${META_WEBHOOK_URL:${app.base-url}/v1/api/meta/webhook}
   # Verify token for webhook validation (must match what you set in Meta Developer Console)
   webhook-verify-token: ${META_WEBHOOK_VERIFY_TOKEN:jade_meta_webhook_verify_2024}
 

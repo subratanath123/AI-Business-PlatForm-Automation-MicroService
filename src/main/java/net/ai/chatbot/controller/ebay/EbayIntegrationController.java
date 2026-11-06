@@ -52,23 +52,27 @@ public class EbayIntegrationController {
     @PostMapping("/v1/api/ebay/oauth/init")
     public ResponseEntity<Map<String, Object>> initAuth(@RequestBody(required = false) EbayOAuthInitRequest request) {
         String userId = AuthUtils.getUserId();
-        if (oauth.appId() == null || oauth.appId().isBlank()) {
+        String requested = request == null ? null : request.getEnvironment();
+        String env = oauth.normalizeEnvironment(requested);
+        if (oauth.appId(env) == null || oauth.appId(env).isBlank()) {
             return ResponseEntity.badRequest().body(Map.of(
-                    "error", "EBAY_APP_ID is not configured. Register an eBay developer app first."));
+                    "error", "eBay " + env + " App ID is not configured. Register an eBay developer app first."));
         }
-        if (oauth.ruName() == null || oauth.ruName().isBlank()) {
+        if (oauth.ruName(env) == null || oauth.ruName(env).isBlank()) {
             return ResponseEntity.badRequest().body(Map.of(
-                    "error", "EBAY_RU_NAME is not configured. Add a RuName in your eBay developer dashboard."));
+                    "error", "eBay " + env + " RuName is not configured. Add a RuName in your eBay developer dashboard."));
         }
         try {
-            String env = request == null ? null : request.getEnvironment();
             EbayPendingConnection pending = ebayService.initAuth(userId, env);
 
-            String authorizeUrl = oauth.authorizeHost(pending.getEnvironment())
+            String authorizeHost = oauth.authorizeHost(pending.getEnvironment());
+            log.info("eBay OAuth authorize host={} environment={}", authorizeHost, pending.getEnvironment());
+
+            String authorizeUrl = authorizeHost
                     + "/oauth2/authorize"
-                    + "?client_id="     + enc(oauth.appId())
+                    + "?client_id="     + enc(oauth.appId(pending.getEnvironment()))
                     + "&response_type=" + enc("code")
-                    + "&redirect_uri="  + enc(oauth.ruName())
+                    + "&redirect_uri="  + enc(oauth.ruName(pending.getEnvironment()))
                     + "&state="         + enc(pending.getState())
                     + "&scope="         + enc(EbayIntegrationService.OAUTH_SCOPES);
 
@@ -76,7 +80,7 @@ public class EbayIntegrationController {
             resp.put("state",        pending.getState());
             resp.put("environment",  pending.getEnvironment());
             resp.put("authorizeUrl", authorizeUrl);
-            resp.put("ruName",       oauth.ruName());
+            resp.put("ruName",       oauth.ruName(pending.getEnvironment()));
             return ResponseEntity.ok(resp);
         } catch (Exception e) {
             log.error("eBay auth init failed for user {}: {}", userId, e.getMessage());
@@ -174,6 +178,35 @@ public class EbayIntegrationController {
     }
 
     // ──────────────────────────────────────────────────────────────────────────
+    // Inventory locations (Sell Inventory API; Seller Hub does not create these)
+    // ──────────────────────────────────────────────────────────────────────────
+
+    @GetMapping("/v1/api/ebay/locations")
+    public ResponseEntity<Map<String, Object>> listLocations() {
+        String userId = AuthUtils.getUserId();
+        try {
+            return ResponseEntity.ok(ebayService.listLocations(userId));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Body: {@code name, addressLine1, addressLine2?, city, stateOrProvince, postalCode, country}.
+     * Creates an ENABLED WAREHOUSE location and makes it the store default.
+     */
+    @PostMapping("/v1/api/ebay/locations")
+    public ResponseEntity<Map<String, Object>> createLocation(@RequestBody Map<String, Object> body) {
+        String userId = AuthUtils.getUserId();
+        try {
+            return ResponseEntity.ok(ebayService.createLocation(userId, body == null ? Map.of() : body));
+        } catch (Exception e) {
+            log.warn("eBay location creation failed for user {}: {}", userId, e.getMessage());
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
     // Sync / upload / parse
     // ──────────────────────────────────────────────────────────────────────────
 
@@ -238,7 +271,8 @@ public class EbayIntegrationController {
             return ResponseEntity.badRequest().body(Map.of("error", "No valid images supplied"));
         }
         try {
-            List<EbayProductDto> products = ebayService.parseProductsFromImages(imageUrls);
+            List<EbayProductDto> products = ebayService.parseProductsFromImages(
+                    AuthUtils.getUserId(), AuthUtils.getUserEmail(), imageUrls);
             return ResponseEntity.ok(Map.of("products", products, "count", products.size()));
         } catch (Exception e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));

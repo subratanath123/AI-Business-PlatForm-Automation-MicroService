@@ -74,7 +74,7 @@ public class AIImageController {
         }
 
         try {
-            AIImageJob job = imageService.createJob(userEmail, prompt, size, quality, style);
+            AIImageJob job = imageService.createJob(userEmail, AuthUtils.getUserId(), prompt, size, quality, style);
             return ResponseEntity.ok(Map.of(
                 "jobId", job.getId(),
                 "status", job.getStatus()

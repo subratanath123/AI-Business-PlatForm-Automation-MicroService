@@ -10,18 +10,15 @@ import net.ai.chatbot.dto.n8n.N8NChatResponse;
 import net.ai.chatbot.entity.ChatBot;
 import net.ai.chatbot.service.aichatbot.ChatBotService;
 import net.ai.chatbot.service.admin.GuardrailService;
+import net.ai.chatbot.service.aiprocess.NativeAiChatService;
 import net.ai.chatbot.service.googlecalendar.ChatbotOwnershipService;
-import net.ai.chatbot.service.n8n.GenericN8NService;
 import net.ai.chatbot.utils.AuthUtils;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Authenticated user chat endpoint for N8N integration
@@ -35,7 +32,7 @@ import java.util.Map;
 public class AuthenticatedUserChatN8NController {
 
     @Autowired
-    private GenericN8NService<Message, Object> n8nService;
+    private NativeAiChatService nativeAiChatService;
 
     @Autowired
     private ChatBotService chatBotService;
@@ -46,40 +43,54 @@ public class AuthenticatedUserChatN8NController {
     @Autowired
     private GuardrailService guardrailService;
 
-    @Value("${n8n.webhook.knowledgebase.chat.url}")
-    private String webhookUrl;
-
-    @Value("${n8n.webhook.knowledgebase.multimodal.chat.url}")
-    private String multimodalWebhookUrl;
-
     @PostMapping("/chatHistory/{chatbotId}")
     public ResponseEntity<List<UserChatHistory>> getConversationList(@PathVariable String chatbotId) {
-        try {
-            chatbotOwnershipService.verifyCanView(chatbotId, AuthUtils.getEmail());
-        } catch (IllegalArgumentException e) {
+        if (chatBotService.getChatBot(chatbotId) == null) {
             return ResponseEntity.notFound().build();
-        } catch (SecurityException e) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
-        List<UserChatHistory> chatHistories = chatBotService.getChatConversationList(chatbotId);
+        if (canReadAllConversations(chatbotId)) {
+            return ResponseEntity.ok(chatBotService.getChatConversationList(chatbotId));
+        }
 
-        return ResponseEntity.ok(chatHistories);
+        String email = AuthUtils.getEmail();
+        if (email == null || email.isBlank()) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        return ResponseEntity.ok(chatBotService.getChatConversationList(chatbotId, email));
     }
 
     @PostMapping("/chatHistory/{chatbotId}/{conversationId}")
     public ResponseEntity<List<UserChatHistory>> getChatHistory(@PathVariable String chatbotId, @PathVariable String conversationId) {
-        try {
-            chatbotOwnershipService.verifyCanView(chatbotId, AuthUtils.getEmail());
-        } catch (IllegalArgumentException e) {
+        if (chatBotService.getChatBot(chatbotId) == null) {
             return ResponseEntity.notFound().build();
-        } catch (SecurityException e) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
 
-        List<UserChatHistory> chatHistories = chatBotService.getChatHistory(chatbotId, conversationId);
+        boolean readAll = canReadAllConversations(chatbotId);
+        if (!readAll) {
+            String email = AuthUtils.getEmail();
+            if (email == null || email.isBlank()) {
+                return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+            }
+        }
 
-        return ResponseEntity.ok(chatHistories);
+        return ResponseEntity.ok(chatBotService.getChatHistory(chatbotId, conversationId, !readAll));
+    }
+
+    /**
+     * Owners, teammates, and admins can open every thread on a chatbot.
+     * Everyone else may still read the conversations saved under their own email.
+     */
+    private boolean canReadAllConversations(String chatbotId) {
+        if (AuthUtils.isAdmin()) {
+            return true;
+        }
+        try {
+            chatbotOwnershipService.verifyCanView(chatbotId, AuthUtils.getEmail());
+            return true;
+        } catch (IllegalArgumentException | SecurityException e) {
+            return false;
+        }
     }
 
     /**
@@ -109,21 +120,9 @@ public class AuthenticatedUserChatN8NController {
 
         ChatBot chatBot = chatBotService.getChatBot(message.getChatbotId());
 
-        N8NChatResponse<Object> response = n8nService.sendMessage(chatBot, message,
-                message.getFileAttachments() != null && !message.getFileAttachments().isEmpty()
-                        ? multimodalWebhookUrl
-                        : webhookUrl,
-                forwardUserTokenHeader(userToken)
-        );
+        N8NChatResponse<Object> response = nativeAiChatService.reply(chatBot, message, userToken, false);
 
         return ResponseEntity.ok(response);
-    }
-
-    private static Map<String, String> forwardUserTokenHeader(String userToken) {
-        if (userToken == null || userToken.isBlank()) {
-            return Collections.emptyMap();
-        }
-        return Map.of("userToken", userToken);
     }
 
     /**

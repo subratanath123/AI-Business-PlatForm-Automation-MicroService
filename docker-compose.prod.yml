@@ -11,6 +11,9 @@ services:
       - SPRING_CLOUD_CONFIG_URI=http://143.198.58.6:8887
       - SPRING_CLOUD_CONFIG_DISCOVERY_ENABLED=false
       - SPRING_CLOUD_BOOTSTRAP_ENABLED=false
+    volumes:
+      # Keep Playwright's downloaded Chromium across redeploys instead of re-downloading it per container
+      - playwright-browsers:/root/.cache/ms-playwright
     networks:
       - chatbot-network
     restart: always
@@ -30,4 +33,6 @@ networks:
   chatbot-network:
     driver: bridge
 
+volumes:
+  playwright-browsers:
 
