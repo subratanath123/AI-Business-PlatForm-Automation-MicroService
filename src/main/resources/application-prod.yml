@@ -23,7 +23,7 @@ spring:
       discovery:
         enabled: false
       enabled: true
-      uri: http://143.198.58.6:8887
+      uri: http://10.132.0.2:8887
       fail-fast: true
       retry:
         enabled: true
@@ -35,7 +35,7 @@ spring:
         enabled: false
 
   config:
-    import: "configserver:http://143.198.58.6:8887?profile=dev"
+    import: "configserver:http://10.132.0.2:8887?profile=dev"
 
 eureka:
   instance:

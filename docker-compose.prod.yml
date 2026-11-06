@@ -8,7 +8,7 @@ services:
     environment:
       - SPRING_PROFILES_ACTIVE=prod
       - JAVA_OPTS=-Xmx1024m -Xms512m
-      - SPRING_CLOUD_CONFIG_URI=http://143.198.58.6:8887
+      - SPRING_CLOUD_CONFIG_URI=http://10.132.0.2:8887
       - SPRING_CLOUD_CONFIG_DISCOVERY_ENABLED=false
       - SPRING_CLOUD_BOOTSTRAP_ENABLED=false
     volumes:
